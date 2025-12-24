@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V4 — Nhân viên quản lý</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.toolbar .left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:1fr 1.2fr;gap:14px}
+.table{width:100%;border-collapse:separate;border-spacing:0 10px}
+.table th{font-weight:600;color:var(--muted);text-align:left;padding:0 10px}
+.rowcard td{background:#06122a;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px}
+.rowcard td:first-child{border-left:1px solid var(--line);border-top-left-radius:14px;border-bottom-left-radius:14px}
+.rowcard td:last-child{border-right:1px solid var(--line);border-top-right-radius:14px;border-bottom-right-radius:14px}
+.chip{display:inline-flex;align-items:center;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;margin:0 6px 6px 0;background:#081a38}
+.assignbox{border:1px solid var(--line);border-radius:14px;padding:10px;background:#06122a;max-height:360px;overflow:auto}
+@media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" style="margin-bottom:14px">
+    <div class="toolbar">
+      <div class="left">
+        <span class="pill">🐝 QR Factory V4</span>
+        <a href="./index.html">Generate</a>
+        <a href="./dashboard.html">Dashboard</a>
+        <a href="./customers.html">Khách hàng</a>
+        <a href="./staff.html"><b>Nhân viên quản lý</b></a>
+        <a href="./login-qr.html">Login/Outlogin QR</a>
+        <a href="./admin.html">Admin</a>
+      </div>
+      <div class="left">
+        <input id="q" placeholder="Tìm nhân viên…" style="min-width:260px"/>
+        <button class="btn secondary" id="btnRefresh">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px">Quản lý nhân viên & gán khách hàng: <b>nhân viên đang chăm sóc khách nào</b>.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Tạo / Cập nhật nhân viên</h2>
+      <input id="id" type="hidden"/>
+      <label>Tên nhân viên</label>
+      <input id="name" placeholder="Nguyễn Văn A"/>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>Email</label>
+          <input id="email" placeholder="a@company.com"/>
+        </div>
+        <div style="flex:1">
+          <label>SĐT</label>
+          <input id="phone" placeholder="090..."/>
+        </div>
+      </div>
+      <label>Ghi chú</label>
+      <textarea id="note" placeholder="Ghi chú…"></textarea>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="btnSave">💾 Lưu</button>
+        <button class="btn secondary" id="btnNew">＋ Mới</button>
+        <button class="btn danger" id="btnDelete">🗑️ Xoá</button>
+      </div>
+      <div id="msg" class="ok"></div>
+      <div id="err" class="err"></div>
+
+      <div style="margin-top:14px">
+        <h3 style="margin-bottom:8px">Gán khách hàng cho nhân viên</h3>
+        <div class="muted" style="margin-bottom:8px">Chọn 1 nhân viên ở danh sách → tick khách hàng cần gán.</div>
+        <div class="assignbox" id="assignBox">(Chưa chọn nhân viên)</div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn secondary" id="btnSaveAssign">✅ Lưu phân công</button>
+          <span class="muted" id="assignNote" style="margin-left:auto"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Danh sách nhân viên</h2>
+      <div style="overflow:auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nhân viên</th>
+              <th>Liên hệ</th>
+              <th>Khách đang chăm</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted" id="note2"></div>
+    </div>
+  </div>
+</div>
+
+<script src="./qrFactoryV3.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
+function setMsg(t){ $("msg").textContent = t||""; }
+
+let staffRows = [];
+let customerRows = [];
+let assignments = []; // list of {staff_id, customer_id}
+
+function clearForm(){
+  $("id").value="";
+  $("name").value="";
+  $("email").value="";
+  $("phone").value="";
+  $("note").value="";
+  setErr(""); setMsg("");
+  renderAssignBox(null);
+}
+
+function renderAssignBox(staffId){
+  const box = $("assignBox");
+  const staff = staffRows.find(s=>s.id===staffId);
+  if(!staff){
+    box.innerHTML = "(Chưa chọn nhân viên)";
+    box.dataset.staffId = "";
+    return;
+  }
+  box.dataset.staffId = String(staffId);
+  const set = new Set(assignments.filter(a=>a.staff_id===staffId).map(a=>a.customer_id));
+  let html = `<div class="muted" style="margin-bottom:8px">Nhân viên: <b>${esc(staff.name)}</b></div>`;
+  for(const c of customerRows){
+    const checked = set.has(c.id) ? "checked" : "";
+    html += `<label style="display:flex;gap:10px;align-items:center;margin:6px 0">
+      <input type="checkbox" data-cid="${c.id}" ${checked} />
+      <span>${esc(c.name)} <span class="muted">(${esc(c.product_type||"")})</span></span>
+    </label>`;
+  }
+  box.innerHTML = html || "(Chưa có khách hàng)";
+}
+
+async function save(){
+  setErr(""); setMsg("");
+  const body = {
+    id: $("id").value,
+    name: $("name").value,
+    email: $("email").value,
+    phone: $("phone").value,
+    note: $("note").value,
+  };
+  const r = await window.qrFactoryV3.apiPost("/api/staff/upsert", body);
+  $("id").value = r.id;
+  setMsg("Đã lưu.");
+  await refresh();
+}
+
+async function del(){
+  const id = Number($("id").value||0) || 0;
+  if(!id) return;
+  if(!confirm("Xoá nhân viên này?")) return;
+  await window.qrFactoryV3.apiPost("/api/staff/delete", { id });
+  clearForm();
+  await refresh();
+}
+
+async function saveAssign(){
+  const staffId = Number($("assignBox").dataset.staffId||0) || 0;
+  if(!staffId) return;
+  const checks = Array.from($("assignBox").querySelectorAll("input[type=checkbox][data-cid]"));
+  const want = new Set(checks.filter(x=>x.checked).map(x=>Number(x.getAttribute("data-cid"))));
+  const have = new Set(assignments.filter(a=>a.staff_id===staffId).map(a=>a.customer_id));
+
+  // add missing
+  for(const cid of want){
+    if(!have.has(cid)) await window.qrFactoryV3.apiPost("/api/assignments/set", { staff_id: staffId, customer_id: cid, on: true });
+  }
+  // remove extra
+  for(const cid of have){
+    if(!want.has(cid)) await window.qrFactoryV3.apiPost("/api/assignments/set", { staff_id: staffId, customer_id: cid, on: false });
+  }
+  $("assignNote").textContent = "Đã lưu phân công.";
+  await refresh();
+  renderAssignBox(staffId);
+}
+
+function customersOfStaff(staffId){
+  const ids = new Set(assignments.filter(a=>a.staff_id===staffId).map(a=>a.customer_id));
+  return customerRows.filter(c=>ids.has(c.id));
+}
+
+async function refresh(){
+  const q = String($("q").value||"").trim();
+  const staffUrl = q ? `/api/staff?q=${encodeURIComponent(q)}` : "/api/staff";
+  const [s, c, a] = await Promise.all([
+    window.qrFactoryV3.apiGet(staffUrl),
+    window.qrFactoryV3.apiGet("/api/customers"),
+    window.qrFactoryV3.apiGet("/api/assignments"),
+  ]);
+  staffRows = s.rows || [];
+  customerRows = c.rows || [];
+  assignments = (a.rows||[]).map(x=>({staff_id:x.staff_id, customer_id:x.customer_id}));
+
+  const tb = $("tbody");
+  tb.innerHTML = "";
+  for(const st of staffRows){
+    const cust = customersOfStaff(st.id);
+    const tr = document.createElement("tr");
+    tr.className = "rowcard";
+    tr.innerHTML = `
+      <td><a href="#" data-id="${st.id}">${esc(st.name)}</a></td>
+      <td>
+        <div class="muted">${esc(st.email||"")}</div>
+        <div class="muted">${esc(st.phone||"")}</div>
+      </td>
+      <td>${cust.map(x=>`<span class="chip">${esc(x.name)}</span>`).join("") || '<span class="muted">-</span>'}</td>
+    `;
+    tb.appendChild(tr);
+  }
+
+  tb.querySelectorAll("a[data-id]").forEach(a=>{
+    a.onclick = (e)=>{
+      e.preventDefault();
+      const id = Number(a.getAttribute("data-id"));
+      const st = staffRows.find(r=>r.id===id);
+      if(!st) return;
+      $("id").value = st.id;
+      $("name").value = st.name||"";
+      $("email").value = st.email||"";
+      $("phone").value = st.phone||"";
+      $("note").value = st.note||"";
+      setErr(""); setMsg("");
+      renderAssignBox(id);
+      $("assignNote").textContent = "";
+    };
+  });
+
+  $("note2").textContent = `Cập nhật: ${new Date().toLocaleString()} | NV: ${staffRows.length} | KH: ${customerRows.length}`;
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("btnSave").onclick = ()=>save().catch(setErr);
+  $("btnNew").onclick = ()=>clearForm();
+  $("btnDelete").onclick = ()=>del().catch(setErr);
+  $("btnRefresh").onclick = ()=>refresh().catch(setErr);
+  $("btnSaveAssign").onclick = ()=>saveAssign().catch(setErr);
+  $("q").addEventListener("keydown", (e)=>{ if(e.key==="Enter") refresh().catch(setErr); });
+  clearForm();
+  refresh().catch(setErr);
+});
+</script>
+</body></html>

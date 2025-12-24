@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V4 — Mobile Login</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+.center{max-width:520px;margin:0 auto}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap center">
+  <div class="card">
+    <h2>Login / Outlogin (Demo)</h2>
+    <div class="muted">Trang này mô phỏng việc app trên điện thoại nhận token từ QR rồi gọi API để thực thi hành động.</div>
+
+    <label style="margin-top:14px">Token</label>
+    <input id="token" class="mono" placeholder="token"/>
+
+    <label>Device ID (tuỳ chọn)</label>
+    <input id="device_id" class="mono" placeholder="phone-01"/>
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="btnConsume">✅ Xác nhận</button>
+      <a class="btn secondary" href="./login-qr.html">← Về trang admin</a>
+    </div>
+
+    <div id="msg" class="ok"></div>
+    <div id="err" class="err"></div>
+  </div>
+</div>
+
+<script src="./qrFactoryV3.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
+function setMsg(t){ $("msg").textContent = t||""; }
+function getParam(name){
+  const u = new URL(location.href);
+  return u.searchParams.get(name) || "";
+}
+
+async function consume(){
+  setErr(""); setMsg("");
+  const token = $("token").value.trim();
+  if(!token) return setErr(new Error("Token trống"));
+  const device_id = $("device_id").value.trim();
+  const r = await window.qrFactoryV3.apiPost("/api/auth/consume", { token, device_id });
+  setMsg(`OK → action: ${r.action}`);
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("token").value = getParam("token");
+  $("device_id").value = `phone-${Math.random().toString(16).slice(2,6)}`;
+  $("btnConsume").onclick = ()=>consume().catch(setErr);
+});
+</script>
+</body></html>

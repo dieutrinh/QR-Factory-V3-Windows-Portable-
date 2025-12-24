@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V4 — Khách hàng</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.toolbar .left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.table{width:100%;border-collapse:separate;border-spacing:0 10px}
+.table th{font-weight:600;color:var(--muted);text-align:left;padding:0 10px}
+.rowcard td{background:#06122a;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px}
+.rowcard td:first-child{border-left:1px solid var(--line);border-top-left-radius:14px;border-bottom-left-radius:14px}
+.rowcard td:last-child{border-right:1px solid var(--line);border-top-right-radius:14px;border-bottom-right-radius:14px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+.b-red{border-color:#6b1b1b;background:#2a0a0a;color:#ffb3b3}
+.b-yellow{border-color:#6b5b1b;background:#2a230a;color:#ffe7a8}
+.b-green{border-color:#1b6b2a;background:#0a2a12;color:#b7ffd0}
+.b-gray{border-color:var(--line);background:#081a38;color:#cfe0ff}
+@media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" style="margin-bottom:14px">
+    <div class="toolbar">
+      <div class="left">
+        <span class="pill">🐝 QR Factory V4</span>
+        <a href="./index.html">Generate</a>
+        <a href="./dashboard.html">Dashboard</a>
+        <a href="./customers.html"><b>Khách hàng</b></a>
+        <a href="./staff.html">Nhân viên quản lý</a>
+        <a href="./login-qr.html">Login/Outlogin QR</a>
+        <a href="./admin.html">Admin</a>
+      </div>
+      <div class="left">
+        <input id="q" placeholder="Tìm tên khách hàng / loại sản phẩm / trạng thái…" style="min-width:320px"/>
+        <button class="btn secondary" id="btnRefresh">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px">Theo dõi danh sách khách hàng: <b>giá trị</b>, <b>thời hạn hợp đồng</b>, <b>loại sản phẩm</b>.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Tạo / Cập nhật khách hàng</h2>
+      <input id="id" type="hidden"/>
+      <label>Tên khách hàng</label>
+      <input id="name" placeholder="Công ty ABC"/>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>Ngày ký (dd-mm-yyyy)</label>
+          <input id="contract_start" placeholder="24-12-2025"/>
+        </div>
+        <div style="flex:1">
+          <label>Hết hạn (dd-mm-yyyy)</label>
+          <input id="contract_end" placeholder="24-12-2026"/>
+        </div>
+      </div>
+
+      <label>Loại sản phẩm ký</label>
+      <input id="product_type" placeholder="Anti-counterfeit / Traceability / Signed QR…"/>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>Giá trị hợp đồng</label>
+          <input id="contract_value" placeholder="100000000"/>
+        </div>
+        <div style="flex:1">
+          <label>Trạng thái</label>
+          <select id="status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="pending">pending</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Ghi chú</label>
+      <textarea id="note" placeholder="Ghi chú…"></textarea>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="btnSave">💾 Lưu</button>
+        <button class="btn secondary" id="btnNew">＋ Mới</button>
+        <button class="btn danger" id="btnDelete">🗑️ Xoá</button>
+      </div>
+      <div id="msg" class="ok"></div>
+      <div id="err" class="err"></div>
+    </div>
+
+    <div class="card">
+      <h2>Danh sách</h2>
+      <div class="row" style="margin-bottom:10px">
+        <span class="badge b-red">&lt; 10 ngày → đỏ</span>
+        <span class="badge b-yellow">&lt; 30 ngày → vàng</span>
+        <span class="badge b-green">&lt; 90 ngày → xanh</span>
+        <span class="badge b-gray">≥ 90 ngày</span>
+      </div>
+      <div style="overflow:auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Khách hàng</th>
+              <th>Loại SP</th>
+              <th>Giá trị</th>
+              <th>Hết hạn</th>
+              <th>Còn lại</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted" id="note2"></div>
+    </div>
+  </div>
+</div>
+
+<script src="./qrFactoryV3.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+function parseDMY(s){
+  const m = String(s||"").match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if(!m) return null;
+  const d = new Date(Date.UTC(+m[3], +m[2]-1, +m[1], 0,0,0));
+  return isNaN(d) ? null : d;
+}
+function daysLeft(exp){
+  const d = parseDMY(exp);
+  if(!d) return null;
+  const now = new Date();
+  return Math.ceil((d.getTime()-now.getTime())/(24*3600*1000));
+}
+function badgeForDays(n){
+  if(n===null) return `<span class="badge b-gray">-</span>`;
+  if(n < 10) return `<span class="badge b-red">${n} ngày</span>`;
+  if(n < 30) return `<span class="badge b-yellow">${n} ngày</span>`;
+  if(n < 90) return `<span class="badge b-green">${n} ngày</span>`;
+  return `<span class="badge b-gray">${n} ngày</span>`;
+}
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
+function setMsg(t){ $("msg").textContent = t||""; }
+
+function clearForm(){
+  $("id").value="";
+  $("name").value="";
+  $("contract_start").value="";
+  $("contract_end").value="";
+  $("product_type").value="";
+  $("contract_value").value="";
+  $("status").value="active";
+  $("note").value="";
+  setErr(""); setMsg("");
+}
+
+async function save(){
+  setErr(""); setMsg("");
+  const body = {
+    id: $("id").value,
+    name: $("name").value,
+    contract_start: $("contract_start").value,
+    contract_end: $("contract_end").value,
+    product_type: $("product_type").value,
+    contract_value: $("contract_value").value,
+    status: $("status").value,
+    note: $("note").value,
+  };
+  const r = await window.qrFactoryV3.apiPost("/api/customers/upsert", body);
+  $("id").value = r.id;
+  setMsg("Đã lưu.");
+  await refresh();
+}
+
+async function del(){
+  const id = Number($("id").value||0) || 0;
+  if(!id) return;
+  if(!confirm("Xoá khách hàng này?")) return;
+  await window.qrFactoryV3.apiPost("/api/customers/delete", { id });
+  clearForm();
+  await refresh();
+}
+
+async function refresh(){
+  const q = String($("q").value||"").trim();
+  const url = q ? `/api/customers?q=${encodeURIComponent(q)}` : "/api/customers";
+  const r = await window.qrFactoryV3.apiGet(url);
+  const rows = r.rows || [];
+  const tb = $("tbody");
+  tb.innerHTML = "";
+  for(const x of rows){
+    const n = daysLeft(x.contract_end);
+    const tr = document.createElement("tr");
+    tr.className = "rowcard";
+    tr.innerHTML = `
+      <td><a href="#" data-id="${x.id}">${esc(x.name)}</a></td>
+      <td>${esc(x.product_type||"")}</td>
+      <td>${esc(x.contract_value||0)}</td>
+      <td>${esc(x.contract_end||"")}</td>
+      <td>${badgeForDays(n)}</td>
+      <td>${esc(x.status||"")}</td>
+    `;
+    tb.appendChild(tr);
+  }
+
+  tb.querySelectorAll("a[data-id]").forEach(a=>{
+    a.onclick = (e)=>{
+      e.preventDefault();
+      const id = Number(a.getAttribute("data-id"));
+      const x = rows.find(r=>r.id===id);
+      if(!x) return;
+      $("id").value = x.id;
+      $("name").value = x.name||"";
+      $("contract_start").value = x.contract_start||"";
+      $("contract_end").value = x.contract_end||"";
+      $("product_type").value = x.product_type||"";
+      $("contract_value").value = x.contract_value||"";
+      $("status").value = x.status||"active";
+      $("note").value = x.note||"";
+      setErr(""); setMsg("");
+    };
+  });
+
+  $("note2").textContent = `Cập nhật: ${new Date().toLocaleString()} | Tổng: ${rows.length}`;
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("btnSave").onclick = ()=>save().catch(setErr);
+  $("btnNew").onclick = ()=>clearForm();
+  $("btnDelete").onclick = ()=>del().catch(setErr);
+  $("btnRefresh").onclick = ()=>refresh().catch(setErr);
+  $("q").addEventListener("keydown", (e)=>{ if(e.key==="Enter") refresh().catch(setErr); });
+  clearForm();
+  refresh().catch(setErr);
+});
+</script>
+</body></html>

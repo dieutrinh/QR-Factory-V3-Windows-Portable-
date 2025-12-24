@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V4 — Login/Outlogin QR</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.toolbar .left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.qrbox{border:2px dashed #1e3566;border-radius:18px;min-height:260px;display:flex;align-items:center;justify-content:center;background:#071733}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+@media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" style="margin-bottom:14px">
+    <div class="toolbar">
+      <div class="left">
+        <span class="pill">🐝 QR Factory V4</span>
+        <a href="./index.html">Generate</a>
+        <a href="./dashboard.html">Dashboard</a>
+        <a href="./customers.html">Khách hàng</a>
+        <a href="./staff.html">Nhân viên quản lý</a>
+        <a href="./login-qr.html"><b>Login/Outlogin QR</b></a>
+        <a href="./admin.html">Admin</a>
+      </div>
+      <div class="left">
+        <button class="btn secondary" id="btnReload">↻ Nạp cấu hình</button>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px">Tạo QR để <b>đăng nhập/đăng xuất</b> (demo) bằng cách quét trên điện thoại. Admin có thể đổi <b>admin code</b> và <b>link cài app</b>.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Cấu hình admin</h2>
+      <label>Admin code hiện tại</label>
+      <input id="admin_code" class="mono" placeholder="Nhập admin code"/>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnSetAdmin">🔐 Đổi admin code</button>
+        <input id="new_admin_code" class="mono" placeholder="(tuỳ chọn) admin code mới" style="flex:1"/>
+      </div>
+
+      <label style="margin-top:14px">Link cài app (APK/Store)</label>
+      <input id="app_install_url" placeholder="https://..."/>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnSetUrl">📦 Lưu link cài app</button>
+      </div>
+
+      <div id="msg" class="ok"></div>
+      <div id="err" class="err"></div>
+    </div>
+
+    <div class="card">
+      <h2>QR cài app + tạo token Login/Outlogin</h2>
+      <div class="row" style="margin-bottom:10px">
+        <span class="pill">Install URL: <b id="outInstall">-</b></span>
+      </div>
+      <div class="qrbox" id="installBox">QR Install</div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0"/>
+
+      <label>TTL token (phút)</label>
+      <input id="ttl" placeholder="10"/>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnLogin">✅ Tạo Login QR</button>
+        <button class="btn danger" id="btnLogout">⛔ Tạo Outlogin QR</button>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <span class="pill">Token: <b id="outToken" class="mono">-</b></span>
+        <span class="pill">URL: <b id="outUrl" class="mono">-</b></span>
+      </div>
+      <div class="qrbox" id="tokenBox">QR Token</div>
+      <div class="muted" style="margin-top:10px">Điện thoại quét QR Token → gọi API <span class="mono">/api/auth/consume</span> để nhận action (login/logout). Đây là flow demo để bạn tích hợp vào app thật.</div>
+    </div>
+  </div>
+</div>
+
+<script src="./qrFactoryV3.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
+function setMsg(t){ $("msg").textContent = t||""; }
+
+function renderQrText(boxId, text){
+  const box = $(boxId);
+  box.innerHTML = "";
+  if(!text){ box.textContent = "-"; return; }
+  const url = `/api/qrtext/png?text=${encodeURIComponent(text)}&ts=${Date.now()}`;
+  const img = new Image();
+  img.src = url;
+  img.alt = "QR";
+  box.appendChild(img);
+}
+
+async function loadPublic(){
+  const r = await window.qrFactoryV3.apiGet("/api/auth/public");
+  $("outInstall").textContent = r.app_install_url || "-";
+  $("app_install_url").value = r.app_install_url || "";
+  renderQrText("installBox", r.app_install_url || "");
+}
+
+async function setAdminCode(){
+  setErr(""); setMsg("");
+  const admin_code = $("admin_code").value;
+  const new_code = $("new_admin_code").value;
+  const r = await window.qrFactoryV3.apiPost("/api/auth/setAdminCode", { admin_code, new_admin_code: new_code });
+  $("admin_code").value = r.admin_code;
+  $("new_admin_code").value = "";
+  setMsg("Đã đổi admin code.");
+}
+
+async function setInstallUrl(){
+  setErr(""); setMsg("");
+  const admin_code = $("admin_code").value;
+  const app_install_url = $("app_install_url").value;
+  const r = await window.qrFactoryV3.apiPost("/api/auth/setInstallUrl", { admin_code, app_install_url });
+  $("outInstall").textContent = r.app_install_url;
+  setMsg("Đã lưu link cài app.");
+  await loadPublic();
+}
+
+async function issue(type){
+  setErr("");
+  const admin_code = $("admin_code").value;
+  const ttl_minutes = Number($("ttl").value||10) || 10;
+  const r = await window.qrFactoryV3.apiPost("/api/auth/issue", { admin_code, type, ttl_minutes });
+  $("outToken").textContent = r.token;
+  $("outUrl").textContent = r.url;
+  renderQrText("tokenBox", r.url);
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("btnReload").onclick = ()=>loadPublic().catch(setErr);
+  $("btnSetAdmin").onclick = ()=>setAdminCode().catch(setErr);
+  $("btnSetUrl").onclick = ()=>setInstallUrl().catch(setErr);
+  $("btnLogin").onclick = ()=>issue("login").catch(setErr);
+  $("btnLogout").onclick = ()=>issue("logout").catch(setErr);
+  loadPublic().catch(setErr);
+});
+</script>
+</body></html>

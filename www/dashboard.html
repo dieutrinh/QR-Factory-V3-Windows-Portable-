@@ -8,27 +8,76 @@
 .kpi{border:1px solid var(--line);border-radius:16px;padding:14px;background:#071733}
 .kpi b{font-size:22px;display:block;margin-top:2px}
 .muted{color:var(--muted)}
-@media (max-width: 900px){ .grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.toolbar .left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.toolbar input{min-width:280px}
+.table{width:100%;border-collapse:separate;border-spacing:0 10px}
+.table th{font-weight:600;color:var(--muted);text-align:left;padding:0 10px}
+.rowcard td{background:#06122a;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px}
+.rowcard td:first-child{border-left:1px solid var(--line);border-top-left-radius:14px;border-bottom-left-radius:14px}
+.rowcard td:last-child{border-right:1px solid var(--line);border-top-right-radius:14px;border-bottom-right-radius:14px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+.b-red{border-color:#6b1b1b;background:#2a0a0a;color:#ffb3b3}
+.b-yellow{border-color:#6b5b1b;background:#2a230a;color:#ffe7a8}
+.b-green{border-color:#1b6b2a;background:#0a2a12;color:#b7ffd0}
+.b-gray{border-color:var(--line);background:#081a38;color:#cfe0ff}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+@media (max-width: 900px){ .grid{grid-template-columns:repeat(2,minmax(0,1fr));} .toolbar input{min-width:180px} }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <div class="row">
-      <a href="./index.html">← Generate</a>
-      <a href="./admin.html">Admin</a>
-      <span class="muted">Dashboard đọc dữ liệu động từ /api/products</span>
-      <button class="btn secondary" id="btnRefresh">↻ Refresh</button>
+  <div class="card" style="margin-bottom:14px">
+    <div class="toolbar">
+      <div class="left">
+        <span class="pill">🐝 QR Factory V4</span>
+        <a href="./index.html">Generate</a>
+        <a href="./dashboard.html"><b>Dashboard</b></a>
+        <a href="./customers.html">Khách hàng</a>
+        <a href="./staff.html">Nhân viên quản lý</a>
+        <a href="./login-qr.html">Login/Outlogin QR</a>
+        <a href="./admin.html">Admin</a>
+      </div>
+      <div class="left">
+        <input id="q" placeholder="Tìm code / tên sản phẩm / serial…"/>
+        <button class="btn secondary" id="btnRefresh">↻ Refresh</button>
+      </div>
     </div>
+    <div class="muted" style="margin-top:8px">Bảng dưới giúp xem nhanh <b>giá trị mã (code)</b> + số ngày còn lại theo EXP Date.</div>
+  </div>
 
-    <div class="grid" style="margin-top:14px">
+  <div class="card">
+    <div class="grid" style="margin-top:2px">
       <div class="kpi"><div class="muted">Tổng QR</div><b id="kTotal">-</b></div>
       <div class="kpi"><div class="muted">Active</div><b id="kActive">-</b></div>
       <div class="kpi"><div class="muted">Inactive</div><b id="kInactive">-</b></div>
       <div class="kpi"><div class="muted">Hết hạn</div><b id="kExpired">-</b></div>
     </div>
 
-    <p class="muted" id="note" style="margin-top:12px"></p>
+    <div class="row" style="margin-top:12px">
+      <span class="badge b-red">&lt; 10 ngày → đỏ</span>
+      <span class="badge b-yellow">&lt; 30 ngày → vàng</span>
+      <span class="badge b-green">&lt; 90 ngày → xanh</span>
+      <span class="badge b-gray">≥ 90 ngày → bình thường</span>
+      <span class="muted" id="note" style="margin-left:auto"></span>
+    </div>
+
+    <div style="overflow:auto;margin-top:12px">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Sản phẩm</th>
+            <th>Serial</th>
+            <th>EXP</th>
+            <th>Còn lại</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -43,9 +92,32 @@ function parseDMY(s){
   return isNaN(d) ? null : d;
 }
 
+function daysLeft(exp){
+  const d = parseDMY(exp);
+  if(!d) return null;
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  return Math.ceil(diff / (24*3600*1000));
+}
+
+function badgeForDays(n){
+  if(n===null) return `<span class="badge b-gray">-</span>`;
+  if(n < 10) return `<span class="badge b-red">${n} ngày</span>`;
+  if(n < 30) return `<span class="badge b-yellow">${n} ngày</span>`;
+  if(n < 90) return `<span class="badge b-green">${n} ngày</span>`;
+  return `<span class="badge b-gray">${n} ngày</span>`;
+}
+
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
 async function refresh(){
-  const r = await window.qrFactoryV3.apiGet("/api/products");
+  const q = String($("q").value||"").trim();
+  const url = q ? `/api/products?q=${encodeURIComponent(q)}` : "/api/products";
+  const r = await window.qrFactoryV3.apiGet(url);
   const rows = r.rows || [];
+
   const now = new Date();
   let total = rows.length, active=0, inactive=0, expired=0;
   for(const x of rows){
@@ -60,10 +132,30 @@ async function refresh(){
   $("kInactive").textContent = inactive;
   $("kExpired").textContent = expired;
   $("note").textContent = `Cập nhật: ${new Date().toLocaleString()}`;
+
+  const tb = $("tbody");
+  tb.innerHTML = "";
+  for(const x of rows){
+    const n = daysLeft(x.exp_date);
+    const scan = `./qr.html?token=${encodeURIComponent(x.code)}`;
+    const tr = document.createElement("tr");
+    tr.className = "rowcard";
+    tr.innerHTML = `
+      <td class="mono"><a href="${scan}">${esc(x.code)}</a></td>
+      <td>${esc(x.product_name)}</td>
+      <td>${esc(x.batch_serial||"")}</td>
+      <td>${esc(x.exp_date||"")}</td>
+      <td>${badgeForDays(n)}</td>
+      <td>${esc(x.status||"")}</td>
+      <td class="muted">${esc((x.updated_at||"").replace('T',' ').slice(0,19))}</td>
+    `;
+    tb.appendChild(tr);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", ()=>{
   $("btnRefresh").onclick = ()=>refresh().catch(console.error);
+  $("q").addEventListener("keydown", (e)=>{ if(e.key==="Enter") refresh().catch(console.error); });
   refresh().catch(console.error);
 });
 </script>
