@@ -1,6 +1,6 @@
 {
   "name": "qr-factory-v3",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -31,7 +31,9 @@
       "main.js",
       "server.js",
       "preload.js",
-      "package.json"
+      "package.json",
+      "*.html",
+      "qrFactoryV3.js"
     ],
     "win": {
       "target": [

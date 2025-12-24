@@ -143,7 +143,15 @@ app.get("/", (_req,res)=>{
   res.sendFile(idx);
 });
 
+// explicit routes (avoid 404 if static mapping is weird in packaged builds)
+app.get("/index.html", (_req,res)=>{
+  const idx = path.join(WWW, "index.html");
+  res.sendFile(idx);
+});
 
+
+
+console.log("Static WWW path:", WWW);
 function startServer(port=0){
   return new Promise((resolve, reject)=>{
     const server = app.listen(port, "127.0.0.1", ()=>{
