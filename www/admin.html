@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="vi"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>QR Factory V3.1 — Admin</title>
+<title>QR Factory V4 — Admin</title>
 <link rel="stylesheet" href="./shared.css"/>
 <style>
 table{width:100%;border-collapse:collapse;margin-top:12px}
@@ -21,10 +21,11 @@ input{width:360px;max-width:100%}
 <body>
 <div class="wrap">
   <div class="card">
-    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V3.1.1</span></h2>
+    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V4.0.0</span></h2>
     <div class="row">
       <a href="./index.html">← Generate</a>
       <a href="./dashboard.html">Dashboard</a>
+      <a href="./audit.html">Audit</a>
       <input id="q" placeholder="Tìm code / tên / batch... (Enter)">
       <button class="btn secondary" id="btnReload">↻ Tải lại</button>
       <button class="btn secondary" id="btnCheck">🔎 Check update</button>
@@ -80,26 +81,81 @@ async function isElectron(){
 
 function renderRecent(settings){
   const box = $("recentBox");
-  const list = settings?.recentExports || [];
-  if(!list.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+  const list0 = (settings?.recentExports || []).filter(x=>x && x.filePath);
+  if(!list0.length){ box.style.display = "none"; box.innerHTML = ""; return; }
   box.style.display = "block";
+
+  // preserve ui state
+  const prevQ = box.querySelector("#recentQ")?.value ?? "";
+  const prevSort = box.querySelector("#recentSort")?.value ?? "newest";
+
   box.innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <b>Excel export gần đây</b>
-      <span class="muted small">(click để mở thư mục file)</span>
+      <input id="recentQ" placeholder="Lọc theo tên file..." style="width:220px">
+      <select id="recentSort" class="btn secondary" style="padding:8px 10px">
+        <option value="newest">Mới nhất</option>
+        <option value="oldest">Cũ nhất</option>
+        <option value="name">Tên A→Z</option>
+      </select>
+      <span class="muted small">Click file để mở trong Explorer/Finder</span>
     </div>
-    <div style="margin-top:6px">
-      ${list.map(x=>`<a href="#" data-path="${esc(x.filePath||"")}" class="small">📄 ${esc((x.filePath||"").split(/[/\\]/).pop())}</a>`).join("")}
-    </div>
+    <div id="recentList" style="margin-top:8px"></div>
   `;
-  box.querySelectorAll("a[data-path]").forEach(a=>{
-    a.onclick = async (e)=>{
-      e.preventDefault();
-      const p = a.getAttribute("data-path");
-      if(!p) return;
-      try{ await window.qrFactory.openPath(p); }catch(err){ $("err").textContent = err.message||String(err); }
-    };
-  });
+
+  const qEl = box.querySelector("#recentQ");
+  const sEl = box.querySelector("#recentSort");
+  qEl.value = prevQ;
+  sEl.value = prevSort;
+
+  function render(){
+    const q = (qEl.value||"").trim().toLowerCase();
+    const sort = sEl.value || "newest";
+    let list = list0.slice();
+
+    if(q){
+      list = list.filter(x=>{
+        const name = (x.filePath||"").split(/[/\]/).pop().toLowerCase();
+        return name.includes(q);
+      });
+    }
+
+    if(sort==="name"){
+      list.sort((a,b)=>{
+        const an=(a.filePath||"").split(/[/\]/).pop().toLowerCase();
+        const bn=(b.filePath||"").split(/[/\]/).pop().toLowerCase();
+        return an.localeCompare(bn);
+      });
+    }else if(sort==="oldest"){
+      list.sort((a,b)=> String(a.ts||"").localeCompare(String(b.ts||"")));
+    }else{
+      list.sort((a,b)=> String(b.ts||"").localeCompare(String(a.ts||"")));
+    }
+
+    const html = list.map(x=>{
+      const file = (x.filePath||"").split(/[/\]/).pop();
+      const ts = x.ts ? new Date(x.ts).toLocaleString() : "";
+      return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0">
+        <a href="#" data-path="${esc(x.filePath)}">📄 ${esc(file)}</a>
+        <span class="pill2">${esc(ts)}</span>
+      </div>`;
+    }).join("") || `<div class="muted small">Không có file khớp bộ lọc.</div>`;
+
+    box.querySelector("#recentList").innerHTML = html;
+
+    box.querySelectorAll("a[data-path]").forEach(a=>{
+      a.onclick = async (e)=>{
+        e.preventDefault();
+        const p = a.getAttribute("data-path");
+        if(!p) return;
+        try{ await window.qrFactory.openPath(p); }catch(err){ console.error(err); }
+      };
+    });
+  }
+
+  qEl.oninput = render;
+  sEl.onchange = render;
+  render();
 }
 
 async function loadSettings(){
