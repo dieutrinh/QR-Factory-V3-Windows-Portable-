@@ -7,7 +7,6 @@ let serverRef;
 
 async function createWindow(){
   const { startServer } = require("./server");
-  // 0 => random free port
   const started = await startServer(0);
   serverRef = started.server;
   baseUrl = `http://127.0.0.1:${started.port}`;
@@ -52,12 +51,6 @@ ipcMain.handle("api:post", async (_e, url, body)=>{
 ipcMain.handle("open:external", async (_e, url)=>{
   await shell.openExternal(url);
   return { ok: true };
-});
-
-ipcMain.handle("print:pdf", async ()=>{
-  if(!win) throw new Error("No window");
-  const pdf = await win.webContents.printToPDF({ printBackground: true });
-  return { pdfBase64: pdf.toString("base64") };
 });
 
 app.whenReady().then(createWindow);

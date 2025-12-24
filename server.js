@@ -2,6 +2,7 @@ const path = require("path");
 const express = require("express");
 const Database = require("better-sqlite3");
 const QRCode = require("qrcode");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -25,28 +26,63 @@ CREATE TABLE IF NOT EXISTS products (
 );
 CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
 CREATE INDEX IF NOT EXISTS idx_products_product_name ON products(product_name);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  actor TEXT,
+  action TEXT NOT NULL,
+  code TEXT,
+  detail_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_code ON audit_log(code);
 `);
 
 function nowIso() { return new Date().toISOString(); }
 
 function normalizeDMY(s){
-  // expects dd-mm-yyyy; keep as-is if matches, else empty
   if(!s) return "";
   const m = String(s).trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
   return m ? m[0] : String(s).trim();
 }
 
 function makeCode(){
-  // readable random code
   const part = () => Math.random().toString(36).slice(2, 6).toUpperCase();
   return `${part()}-${part()}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+function buildScanUrl(req, code){
+  const publicBase = (process.env.PUBLIC_BASE_URL || "").trim(); // e.g. https://admin.yourdomain.com
+  if(publicBase) return `${publicBase.replace(/\/$/,"")}/qr.html?token=${encodeURIComponent(code)}`;
+  return `${req.protocol}://${req.get("host")}/qr.html?token=${encodeURIComponent(code)}`;
+}
+
+function logAudit({ actor, action, code, detail }){
+  try{
+    db.prepare(`INSERT INTO audit_log(ts, actor, action, code, detail_json) VALUES(?,?,?,?,?)`)
+      .run(nowIso(), actor || "", action, code || "", JSON.stringify(detail || {}));
+  }catch(_e){}
 }
 
 app.get("/health", (_req, res)=>res.json({ ok:true, db: DB_PATH }));
 
 app.get("/api/products", (req, res)=>{
   const q = String(req.query.q||"").trim();
+  const since = String(req.query.since||"").trim();
   let rows;
+
+  if(since){
+    rows = db.prepare(`
+      SELECT code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, updated_at
+      FROM products
+      WHERE updated_at > ?
+      ORDER BY updated_at DESC
+      LIMIT 5000
+    `).all(since);
+    return res.json({ rows });
+  }
+
   if(q){
     const like = `%${q}%`;
     rows = db.prepare(`
@@ -67,7 +103,18 @@ app.get("/api/products", (req, res)=>{
   res.json({ rows });
 });
 
+app.get("/api/products/:code", (req, res)=>{
+  const code = String(req.params.code||"").trim();
+  const row = db.prepare(`
+    SELECT code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, updated_at, created_at
+    FROM products WHERE code=?
+  `).get(code);
+  if(!row) return res.status(404).json({ error: "Not found" });
+  res.json({ row });
+});
+
 app.post("/api/generate", async (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
   const body = req.body || {};
   const product_name = String(body.product_name||"").trim();
   if(!product_name) return res.status(400).json({ error: "product_name is required" });
@@ -97,6 +144,7 @@ app.post("/api/generate", async (req, res)=>{
 
   try {
     insert.run({ code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, created_at, updated_at });
+    logAudit({ actor, action: "UPSERT_PRODUCT", code, detail: { product_name, batch_serial, mfg_date, exp_date, note_extra, status }});
   } catch (e){
     return res.status(500).json({ error: e.message || String(e) });
   }
@@ -108,7 +156,7 @@ app.post("/api/generate", async (req, res)=>{
 app.get("/api/qr/:code/png", async (req, res)=>{
   const code = String(req.params.code||"").trim();
   if(!code) return res.status(400).send("missing code");
-  const url = `${req.protocol}://${req.get("host")}/qr.html?token=${encodeURIComponent(code)}`;
+  const url = buildScanUrl(req, code);
   try{
     const png = await QRCode.toBuffer(url, { type:"png", width: 512, margin: 2 });
     res.setHeader("Content-Type", "image/png");
@@ -118,41 +166,58 @@ app.get("/api/qr/:code/png", async (req, res)=>{
   }
 });
 
-app.get("/api/products/:code", (req, res)=>{
+app.get("/api/qr/:code/pdf", async (req, res)=>{
   const code = String(req.params.code||"").trim();
-  const row = db.prepare(`
-    SELECT code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, updated_at, created_at
-    FROM products WHERE code=?
-  `).get(code);
-  if(!row) return res.status(404).json({ error: "Not found" });
-  res.json({ row });
+  if(!code) return res.status(400).send("missing code");
+  const scanUrl = buildScanUrl(req, code);
+
+  try{
+    const png = await QRCode.toBuffer(scanUrl, { type:"png", width: 800, margin: 2 });
+
+    const doc = new PDFDocument({ size: "A4", margin: 36 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="qr-${code}.pdf"`);
+    doc.pipe(res);
+
+    doc.fontSize(18).fillColor("#111").text("QR Code", { align: "center" });
+    doc.moveDown(0.6);
+
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const qrSize = Math.min(360, pageWidth);
+    const x = doc.page.margins.left + (pageWidth - qrSize) / 2;
+    const y = doc.y + 8;
+    doc.image(png, x, y, { width: qrSize, height: qrSize });
+
+    doc.y = y + qrSize + 18;
+    doc.fontSize(11).fillColor("#111").text("URL:", { align: "center" });
+    doc.fontSize(10).fillColor("#111").text(scanUrl, { align: "center", link: scanUrl, underline: true });
+
+    doc.end();
+  }catch(e){
+    res.status(500).send(e.message||String(e));
+  }
 });
 
-// Serve static UI
+app.get("/api/audit", (req, res)=>{
+  const code = String(req.query.code||"").trim();
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit||100)));
+  const rows = code
+    ? db.prepare(`SELECT ts, actor, action, code, detail_json FROM audit_log WHERE code=? ORDER BY ts DESC LIMIT ?`).all(code, limit)
+    : db.prepare(`SELECT ts, actor, action, code, detail_json FROM audit_log ORDER BY ts DESC LIMIT ?`).all(limit);
+  res.json({ rows });
+});
+
 const fs = require("fs");
 let WWW = path.join(__dirname, "www");
-if(!fs.existsSync(WWW)){
-  // fallback: repo structure has html at root
-  WWW = __dirname;
-}
+if(!fs.existsSync(WWW)) WWW = __dirname;
 app.use(express.static(WWW, { extensions: ["html"] }));
 
-// default
-app.get("/", (_req,res)=>{
-  const idx = path.join(WWW, "index.html");
-  res.sendFile(idx);
-});
+app.get("/", (_req,res)=>res.sendFile(path.join(WWW, "index.html")));
+app.get("/index.html", (_req,res)=>res.sendFile(path.join(WWW, "index.html")));
 
-// explicit routes (avoid 404 if static mapping is weird in packaged builds)
-app.get("/index.html", (_req,res)=>{
-  const idx = path.join(WWW, "index.html");
-  res.sendFile(idx);
-});
-
-
-
-console.log("Static WWW path:", WWW);
 function startServer(port=0){
+  console.log("Static WWW path:", WWW);
+  console.log("PUBLIC_BASE_URL:", process.env.PUBLIC_BASE_URL || "(not set)");
   return new Promise((resolve, reject)=>{
     const server = app.listen(port, "127.0.0.1", ()=>{
       const address = server.address();
