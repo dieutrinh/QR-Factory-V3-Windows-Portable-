@@ -1,1 +1,185 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>QR Factory V3 — Generate</title>
+  <style>
+    :root{--bg:#071022;--panel:#0b1a33;--panel2:#0a1630;--txt:#d7e2ff;--muted:#92a6d6;--line:#1e3566;--ok:#7CFFB4;--warn:#FFD27C;}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,Segoe UI,Arial}
+    .wrap{max-width:1180px;margin:20px auto;padding:16px}
+    .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
+    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    label{display:block;color:var(--muted);font-weight:600;margin-top:10px}
+    input,textarea,select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#071733;color:var(--txt)}
+    textarea{min-height:92px;resize:vertical}
+    button{padding:10px 14px;border-radius:12px;border:0;background:#243a6b;color:#fff;cursor:pointer}
+    button.secondary{background:#14264b;border:1px solid var(--line)}
+    .pill{display:inline-block;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+    .err{color:#ffb4b4;margin-top:10px}
+    .ok{color:var(--ok);margin-top:10px}
+    .qrbox{border:2px dashed #1e3566;border-radius:18px;min-height:360px;display:flex;align-items:center;justify-content:center}
+    img{max-width:100%;height:auto}
+    a{color:#9ec1ff;text-decoration:none} a:hover{text-decoration:underline}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" style="margin-bottom:14px">
+    <div class="row">
+      <span class="pill">🐝 QR Factory V3</span>
+      <a href="./admin.html">Admin</a>
+      <a href="./dashboard.html">Dashboard</a>
+    </div>
+  </div>
 
+  <div class="grid">
+    <div class="card">
+      <h2>Tạo QR</h2>
+
+      <label>Product Name</label>
+      <input id="product_name" placeholder="Ví dụ: Trái cam">
+
+      <label>Batch / Serial</label>
+      <input id="batch_serial" placeholder="Ví dụ: Lô 001">
+
+      <div class="row">
+        <div style="flex:1">
+          <label>MFG Date (dd-mm-yyyy)</label>
+          <input id="mfg_date" placeholder="23-12-2025">
+        </div>
+        <div style="flex:1">
+          <label>EXP Date (dd-mm-yyyy)</label>
+          <input id="exp_date" placeholder="23-01-2026">
+        </div>
+      </div>
+
+      <label>Note / Extra</label>
+      <textarea id="note_extra" placeholder="Ghi chú..."></textarea>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>Status</label>
+          <select id="status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <label>(Tuỳ chọn) Code</label>
+          <input id="code" placeholder="Để trống sẽ tự sinh">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button id="btnCreate">Tạo QR (lưu DB)</button>
+        <button class="secondary" id="btnOpen">Mở link scan</button>
+        <button class="secondary" id="btnPng">Tải PNG</button>
+        <button class="secondary" id="btnPdf">Tải PDF</button>
+      </div>
+
+      <div id="msg" class="ok"></div>
+      <div id="err" class="err"></div>
+    </div>
+
+    <div class="card">
+      <h2>Kết quả</h2>
+      <div class="row" style="margin-bottom:10px">
+        <span class="pill">Code: <b id="outCode">-</b></span>
+        <span class="pill">URL: <b id="outUrl">-</b></span>
+      </div>
+      <div class="qrbox" id="qrBox">QR Preview</div>
+    </div>
+  </div>
+</div>
+
+<script src="./qrFactoryV3.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+let currentCode = "";
+let currentUrl = "";
+
+function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
+function setMsg(t){ $("msg").textContent = t||""; }
+
+async function create(){
+  setErr(""); setMsg("");
+  const body = {
+    product_name: $("product_name").value,
+    batch_serial: $("batch_serial").value,
+    mfg_date: $("mfg_date").value,
+    exp_date: $("exp_date").value,
+    note_extra: $("note_extra").value,
+    status: $("status").value,
+    code: $("code").value
+  };
+  const r = await window.qrFactoryV3.apiPost("/api/generate", body);
+  currentCode = r.code;
+  currentUrl = r.scan_url;
+  $("outCode").textContent = currentCode;
+  $("outUrl").textContent = currentUrl;
+  setMsg("Đã tạo/lưu QR thành công.");
+  await renderQR();
+}
+
+async function renderQR(){
+  if(!currentCode) return;
+  const imgUrl = `/api/qr/${encodeURIComponent(currentCode)}/png?ts=${Date.now()}`;
+  const img = new Image();
+  img.src = imgUrl;
+  img.alt = "QR";
+  const box = $("qrBox");
+  box.innerHTML = "";
+  box.appendChild(img);
+}
+
+async function openLink(){
+  if(!currentCode) return setErr("Chưa có code.");
+  const full = location.origin + currentUrl;
+  // Electron: openExternal; Web: open new tab
+  if(window.qrFactory && typeof window.qrFactory.openExternal === "function"){
+    await window.qrFactory.openExternal(full);
+  } else {
+    window.open(full, "_blank");
+  }
+}
+
+async function downloadPNG(){
+  if(!currentCode) return setErr("Chưa có code.");
+  const r = await fetch(`/api/qr/${encodeURIComponent(currentCode)}/png`);
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `qr-${currentCode}.png`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function downloadPDF(){
+  // Web fallback: print dialog
+  if(window.qrFactory && typeof window.qrFactory.printToPDF === "function"){
+    const r = await window.qrFactory.printToPDF();
+    const bytes = Uint8Array.from(atob(r.pdfBase64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], {type:"application/pdf"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `qr-${currentCode||"preview"}.pdf`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } else {
+    window.print();
+  }
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("btnCreate").onclick = ()=>create().catch(setErr);
+  $("btnOpen").onclick = ()=>openLink().catch(setErr);
+  $("btnPng").onclick = ()=>downloadPNG().catch(setErr);
+  $("btnPdf").onclick = ()=>downloadPDF().catch(setErr);
+});
+</script>
+</body>
+</html>
