@@ -6,6 +6,17 @@ let win;
 let baseUrl;
 let serverRef;
 
+// Ensure DB is always writable/persistent in packaged builds.
+// If QR_DB is not explicitly provided, store it under Electron userData.
+function ensureDbPath(){
+  try{
+    if(process.env.QR_DB) return;
+    process.env.QR_DB = path.join(app.getPath("userData"), "qr-factory.db");
+  }catch{
+    // ignore
+  }
+}
+
 // ----------------------
 // Persistent settings
 // ----------------------
@@ -47,6 +58,7 @@ function patchSettings(patch){
 }
 
 async function createWindow(){
+  ensureDbPath();
   const { startServer } = require("./server");
   const started = await startServer(0);
   serverRef = started.server;
