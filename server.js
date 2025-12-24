@@ -109,6 +109,17 @@ function buildScanUrl(req, code){
   return `${req.protocol}://${req.get("host")}/qr.html?token=${encodeURIComponent(code)}`;
 }
 
+function buildPublicBase(req){
+  const publicBase = (process.env.PUBLIC_BASE_URL || "").trim();
+  if(publicBase) return publicBase.replace(/\/$/, "");
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function normalizeAdminCode(s){
+  // UI may accidentally persist a masked value like "abc***"; strip asterisks + whitespace.
+  return String(s||"").trim().replace(/\*/g, "");
+}
+
 function logAudit({ actor, action, code, detail }){
   try{
     db.prepare(`INSERT INTO audit_log(ts, actor, action, code, detail_json) VALUES(?,?,?,?,?)`)
@@ -317,12 +328,18 @@ function makeToken(){
 
 app.get("/api/auth/public", (_req, res)=>{
   // Safe information for rendering the install/login page
-  res.json({ app_install_url: getSetting("app_install_url"), has_admin_code: !!getSetting("admin_code") });
+  // For this offline Electron demo, we also return the current admin code so the operator can use it.
+  // If you deploy this on the internet, you should remove this field and implement real auth.
+  res.json({
+    app_install_url: getSetting("app_install_url"),
+    has_admin_code: !!getSetting("admin_code"),
+    admin_code: getSetting("admin_code"),
+  });
 });
 
 app.post("/api/auth/setAdminCode", (req, res)=>{
   const b = req.body || {};
-  const current = String((b.current_admin_code||b.admin_code)||"").trim();
+  const current = normalizeAdminCode(b.current_admin_code||b.admin_code);
   const next = String(b.new_admin_code||"").trim();
   if(current !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
   if(!next || next.length < 6) return res.status(400).json({ error: "new_admin_code too short" });
@@ -333,7 +350,7 @@ app.post("/api/auth/setAdminCode", (req, res)=>{
 
 app.post("/api/auth/setInstallUrl", (req, res)=>{
   const b = req.body || {};
-  const admin = String(b.admin_code||"").trim();
+  const admin = normalizeAdminCode(b.admin_code);
   const url = String(b.app_install_url||"").trim();
   if(admin !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
   if(!url) return res.status(400).json({ error: "app_install_url required" });
@@ -344,7 +361,7 @@ app.post("/api/auth/setInstallUrl", (req, res)=>{
 
 app.post("/api/auth/issue", (req, res)=>{
   const b = req.body || {};
-  const admin = String(b.admin_code||"").trim();
+  const admin = normalizeAdminCode(b.admin_code);
   if(admin !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
   const type = String(b.type||"login").trim().toLowerCase();
   if(type !== "login" && type !== "logout") return res.status(400).json({ error: "type must be login|logout" });
@@ -353,7 +370,8 @@ app.post("/api/auth/issue", (req, res)=>{
   const expires_at = new Date(Date.now() + ttl*60*1000).toISOString();
   db.prepare(`INSERT INTO auth_tokens(token, type, expires_at, used_at, used_by, created_by, created_at)
     VALUES(?,?,?,?,?,?,?)`).run(token, type, expires_at, "", "", "admin", nowIso());
-  const qr_url = `/login.html?token=${encodeURIComponent(token)}`;
+  const rel = `/login.html?token=${encodeURIComponent(token)}`;
+  const qr_url = `${buildPublicBase(req)}${rel}`;
   logAudit({ actor: "admin", action: "ISSUE_TOKEN", code: token, detail: { type, ttl } });
   res.json({ ok:true, token, type, expires_at, qr_url, url: qr_url });
 });
