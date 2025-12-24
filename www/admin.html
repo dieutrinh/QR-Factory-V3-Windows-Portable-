@@ -261,7 +261,11 @@ async function importExcel(){
   const r = await window.qrFactory.importExcelFromFile(pick.filePath);
   await loadSettings();
   await load();
-  $("syncNote").textContent = `Imported: ${r.imported} • Public URL: ${r.publicUrl || "(empty)"}`;
+  const imp = r.imported || 0;
+  const txt = (typeof imp === "object")
+    ? `products=${imp.products||0}, customers=${imp.customers||0}, staff=${imp.staff||0}`
+    : String(imp);
+  $("syncNote").textContent = `Imported: ${txt} • Public URL: ${r.publicUrl || "(empty)"}`;
 }
 
 document.addEventListener("DOMContentLoaded", ()=>{
@@ -310,4 +314,5 @@ document.addEventListener("DOMContentLoaded", ()=>{
   load().catch(e=>$("err").textContent=e.message||String(e));
 });
 </script>
+<div class="issuer">VCRR Co.ltd</div>
 </body></html>

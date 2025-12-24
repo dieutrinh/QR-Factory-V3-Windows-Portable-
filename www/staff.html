@@ -33,6 +33,8 @@
       <div class="left">
         <input id="q" placeholder="Tìm nhân viên…" style="min-width:260px"/>
         <button class="btn secondary" id="btnRefresh">↻ Refresh</button>
+        <button class="btn" id="btnExport">⬇ Xuất Excel</button>
+        <button class="btn secondary" id="btnImport">⬆ Import Excel</button>
       </div>
     </div>
     <div class="muted" style="margin-top:8px">Quản lý nhân viên & gán khách hàng: <b>nhân viên đang chăm sóc khách nào</b>.</div>
@@ -105,6 +107,29 @@ function esc(s){
 }
 function setErr(e){ $("err").textContent = e? (e.message||String(e)) : ""; }
 function setMsg(t){ $("msg").textContent = t||""; }
+
+async function isElectron(){
+  return !!(window.qrFactory && typeof window.qrFactory.getSettings === "function");
+}
+
+async function exportExcel(){
+  setErr(""); setMsg("");
+  if(!(await isElectron())) throw new Error("Xuất/Import Excel chỉ hỗ trợ khi chạy bản Electron (.exe/.dmg/.AppImage).\nMở mục Admin để chọn thư mục Excel trước.");
+  const r = await window.qrFactory.exportExcelToFolder();
+  setMsg(`Đã xuất Excel: ${r.filePath}`);
+}
+
+async function importExcel(){
+  setErr(""); setMsg("");
+  if(!(await isElectron())) throw new Error("Xuất/Import Excel chỉ hỗ trợ khi chạy bản Electron (.exe/.dmg/.AppImage).\nMở mục Admin để chọn thư mục Excel trước.");
+  const pick = await window.qrFactory.pickExcelFile();
+  if(pick.canceled) return;
+  const r = await window.qrFactory.importExcelFromFile(pick.filePath);
+  const imp = r.imported || 0;
+  const txt = (typeof imp === "object") ? `staff=${imp.staff||0}` : String(imp);
+  setMsg(`Đã import (${txt}).`);
+  await refresh();
+}
 
 let staffRows = [];
 let customerRows = [];
@@ -244,10 +269,13 @@ document.addEventListener("DOMContentLoaded", ()=>{
   $("btnNew").onclick = ()=>clearForm();
   $("btnDelete").onclick = ()=>del().catch(setErr);
   $("btnRefresh").onclick = ()=>refresh().catch(setErr);
+  $("btnExport").onclick = ()=>exportExcel().catch(setErr);
+  $("btnImport").onclick = ()=>importExcel().catch(setErr);
   $("btnSaveAssign").onclick = ()=>saveAssign().catch(setErr);
   $("q").addEventListener("keydown", (e)=>{ if(e.key==="Enter") refresh().catch(setErr); });
   clearForm();
   refresh().catch(setErr);
 });
 </script>
+<div class="issuer">VCRR Co.ltd</div>
 </body></html>
