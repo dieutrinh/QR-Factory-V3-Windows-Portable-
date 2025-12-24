@@ -1,26 +1,19 @@
 <!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>QR Factory V3 — Scan</title>
-  <style>
-    :root{--bg:#071022;--panel:#0b1a33;--panel2:#0a1630;--txt:#d7e2ff;--muted:#92a6d6;--line:#1e3566;}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,Segoe UI,Arial}
-    .wrap{max-width:900px;margin:20px auto;padding:16px}
-    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px}
-    .muted{color:var(--muted)}
-    table{width:100%;border-collapse:collapse;margin-top:10px}
-    td{border-bottom:1px solid var(--line);padding:8px 0}
-    a{color:#9ec1ff;text-decoration:none} a:hover{text-decoration:underline}
-  </style>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V3.1 — Scan</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+table{width:100%;border-collapse:collapse;margin-top:10px}
+td{border-bottom:1px solid var(--line);padding:10px 0}
+</style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
-    <div class="muted">QR Factory V3</div>
+    <div class="muted">QR Factory V3.1</div>
     <h2>Thông tin sản phẩm</h2>
-    <div id="err" style="color:#ffb4b4"></div>
+    <div id="err" class="err"></div>
     <table id="tb"></table>
     <p class="muted"><a href="./index.html">← Generate</a></p>
   </div>
@@ -52,5 +45,4 @@ async function run(){
 }
 run().catch(e=>err.textContent=e.message||String(e));
 </script>
-</body>
-</html>
+</body></html>

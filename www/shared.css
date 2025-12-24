@@ -1,0 +1,23 @@
+
+:root{--bg:#071022;--panel:#0b1a33;--panel2:#0a1630;--txt:#d7e2ff;--muted:#92a6d6;--line:#1e3566;--ok:#7CFFB4;--warn:#FFD27C;}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,Segoe UI,Arial}
+a{color:#9ec1ff;text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1180px;margin:20px auto;padding:16px}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+label{display:block;color:var(--muted);font-weight:600;margin-top:10px}
+input,textarea,select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#071733;color:var(--txt)}
+textarea{min-height:92px;resize:vertical}
+.pill{display:inline-block;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+.err{color:#ffb4b4;margin-top:10px}
+.ok{color:var(--ok);margin-top:10px}
+
+/* 3D buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.10);color:#fff;
+  background:linear-gradient(180deg, rgba(86,124,255,.95), rgba(30,58,138,.95));
+  box-shadow:0 10px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  cursor:pointer; user-select:none; transition:transform .06s ease, filter .12s ease, box-shadow .12s ease;}
+.btn:hover{filter:brightness(1.05)}
+.btn:active{transform:translateY(2px); box-shadow:0 6px 12px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.20);}
+.btn.secondary{background:linear-gradient(180deg, rgba(40,58,107,.95), rgba(15,25,55,.95));}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}

@@ -1,37 +1,30 @@
 <!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>QR Factory V3 — Admin</title>
-  <style>
-    :root{--bg:#071022;--panel:#0b1a33;--panel2:#0a1630;--txt:#d7e2ff;--muted:#92a6d6;--line:#1e3566;}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,Segoe UI,Arial}
-    .wrap{max-width:1180px;margin:20px auto;padding:16px}
-    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px}
-    a{color:#9ec1ff;text-decoration:none} a:hover{text-decoration:underline}
-    input{width:360px;max-width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#071733;color:var(--txt)}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
-    th{color:var(--muted);font-weight:600}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    button{padding:10px 14px;border-radius:12px;border:0;background:#243a6b;color:#fff;cursor:pointer}
-    .pill{display:inline-block;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
-    .err{margin-top:10px;color:#ffb4b4}
-  </style>
+<html lang="vi"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Factory V3.1 — Admin</title>
+<link rel="stylesheet" href="./shared.css"/>
+<style>
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.hi{outline:2px solid rgba(124,255,180,.35); background: rgba(124,255,180,.06);}
+input{width:360px;max-width:100%}
+</style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
-    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V3</span></h2>
+    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V3.1</span></h2>
     <div class="row">
       <a href="./index.html">← Generate</a>
       <a href="./dashboard.html">Dashboard</a>
-      <input id="q" placeholder="Tìm code / tên / batch...">
-      <button id="btnReload">Tải lại</button>
-      <button id="btnExport">Xuất Excel</button>
+      <input id="q" placeholder="Tìm code / tên / batch... (Enter)">
+      <button class="btn secondary" id="btnReload">↻ Tải lại</button>
+      <button class="btn secondary" id="btnCheck">🔎 Check update</button>
+      <button class="btn" id="btnExport">⬇ Xuất Excel</button>
     </div>
     <div id="err" class="err"></div>
+    <div class="muted" id="syncNote" style="margin-top:8px"></div>
 
     <table>
       <thead>
@@ -50,17 +43,13 @@ const $=id=>document.getElementById(id);
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));}
 
 let lastRows = [];
+let lastSync = null;
+const changed = new Set();
 
-async function load(){
-  $("err").textContent = "";
-  const q = $("q").value.trim();
-  const url = q ? `/api/products?q=${encodeURIComponent(q)}` : "/api/products";
-  const r = await window.qrFactoryV3.apiGet(url);
-  const rows = r.rows || [];
-  lastRows = rows;
+function renderTable(){
   const tb = $("tb");
-  tb.innerHTML = rows.map(x=>`
-    <tr>
+  tb.innerHTML = lastRows.map(x=>`
+    <tr class="${changed.has(x.code) ? "hi": ""}">
       <td><a href="./qr.html?token=${encodeURIComponent(x.code)}">${esc(x.code)}</a></td>
       <td>${esc(x.product_name)}</td>
       <td>${esc(x.batch_serial)}</td>
@@ -73,17 +62,63 @@ async function load(){
   `).join("");
 }
 
+async function load(){
+  $("err").textContent = "";
+  changed.clear();
+  const q = $("q").value.trim();
+  const url = q ? `/api/products?q=${encodeURIComponent(q)}` : "/api/products";
+  const r = await window.qrFactoryV3.apiGet(url);
+  lastRows = r.rows || [];
+  lastSync = new Date().toISOString();
+  $("syncNote").textContent = `Last sync: ${new Date().toLocaleString()}`;
+  renderTable();
+}
+
+async function checkUpdate(){
+  $("err").textContent = "";
+  if(!lastSync) return load();
+  const r = await window.qrFactoryV3.apiGet(`/api/products?since=${encodeURIComponent(lastSync)}`);
+  const rows = r.rows || [];
+  rows.forEach(x => changed.add(x.code));
+
+  const map = new Map(lastRows.map(x=>[x.code,x]));
+  for(const x of rows) map.set(x.code, x);
+  lastRows = Array.from(map.values()).sort((a,b)=> String(b.updated_at).localeCompare(String(a.updated_at)));
+
+  lastSync = new Date().toISOString();
+  $("syncNote").textContent = `Last sync: ${new Date().toLocaleString()} • updates: ${rows.length}`;
+  renderTable();
+}
+
 async function exportExcel(){
-  // Uses SheetJS via CDN for online usage. For Electron offline, bundle XLSX locally.
   if(!window.XLSX){
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
     s.onload = () => exportExcel().catch(e=>$("err").textContent=e.message||String(e));
-    s.onerror = () => $("err").textContent = "Không tải được thư viện XLSX (CDN).";
+    s.onerror = () => $("err").textContent = "Không tải được XLSX (CDN).";
     document.head.appendChild(s);
     return;
   }
-  const ws = XLSX.utils.json_to_sheet(lastRows);
+
+  const rows = lastRows.map(r => ({
+    code: r.code,
+    product_name: r.product_name,
+    batch_serial: r.batch_serial,
+    mfg_date: r.mfg_date,
+    exp_date: r.exp_date,
+    note_extra: r.note_extra,
+    status: r.status,
+    updated_at: r.updated_at,
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range(range) };
+  ws["!cols"] = [
+    { wch: 18 },{ wch: 18 },{ wch: 16 },{ wch: 12 },{ wch: 12 },{ wch: 20 },{ wch: 10 },{ wch: 26 }
+  ];
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "products");
   XLSX.writeFile(wb, `qr-products-${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -91,10 +126,10 @@ async function exportExcel(){
 
 document.addEventListener("DOMContentLoaded", ()=>{
   $("btnReload").onclick = ()=>load().catch(e=>$("err").textContent=e.message||String(e));
+  $("btnCheck").onclick = ()=>checkUpdate().catch(e=>$("err").textContent=e.message||String(e));
   $("btnExport").onclick = ()=>exportExcel().catch(e=>$("err").textContent=e.message||String(e));
   $("q").addEventListener("keydown",(e)=>{ if(e.key==="Enter") load().catch(err=>$("err").textContent=err.message||String(err)); });
   load().catch(e=>$("err").textContent=e.message||String(e));
 });
 </script>
-</body>
-</html>
+</body></html>

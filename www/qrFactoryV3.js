@@ -10,7 +10,6 @@
     }
     return data;
   }
-
   async function apiGet(url){
     if (window.qrFactory && typeof window.qrFactory.apiGet === "function") return window.qrFactory.apiGet(url);
     return fetchJson(url, {method:"GET"});
@@ -19,6 +18,5 @@
     if (window.qrFactory && typeof window.qrFactory.apiPost === "function") return window.qrFactory.apiPost(url, body);
     return fetchJson(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
   }
-
   window.qrFactoryV3 = { apiGet, apiPost };
 })();
