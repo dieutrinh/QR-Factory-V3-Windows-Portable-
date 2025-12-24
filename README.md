@@ -1,4 +1,4 @@
-# QR Factory V3.1 (Trọn gói)
+# QR Factory V3.1.1 (Trọn gói)
 
 ## Có sẵn trong ZIP này
 - UI 3D buttons đồng bộ (Generate/Admin/Dashboard/Scan)
@@ -7,7 +7,11 @@
 - Admin:
   - Search (Enter)
   - Check update (delta) theo `since` + highlight dòng đổi
-  - Excel export: freeze header + autofilter + width cột
+  - Excel Export/Import **offline** (không cần CDN):
+    - Chọn thư mục Excel (lưu vĩnh viễn trong app)
+    - Export vào thư mục đó + nút "Export + Open"
+    - Import Excel để bulk upsert vào DB
+    - Sheet `config` có `config.publicBaseUrl` → sửa rồi Import lại để cập nhật URL runtime
 - Audit log (tuỳ chọn):
   - tự ghi khi tạo/cập nhật QR (UPSERT_PRODUCT)
   - xem qua API: `GET /api/audit?limit=100` hoặc `GET /api/audit?code=XXX`

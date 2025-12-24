@@ -153,6 +153,54 @@ app.post("/api/generate", async (req, res)=>{
   res.json({ code, scan_url });
 });
 
+// Bulk upsert from Excel import (offline admin tool)
+app.post("/api/products/bulkUpsert", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const body = req.body || {};
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if(!rows.length) return res.json({ ok:true, imported: 0 });
+
+  const insert = db.prepare(`
+    INSERT INTO products(code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, created_at, updated_at)
+    VALUES (@code, @product_name, @batch_serial, @mfg_date, @exp_date, @note_extra, @status, @created_at, @updated_at)
+    ON CONFLICT(code) DO UPDATE SET
+      product_name=excluded.product_name,
+      batch_serial=excluded.batch_serial,
+      mfg_date=excluded.mfg_date,
+      exp_date=excluded.exp_date,
+      note_extra=excluded.note_extra,
+      status=excluded.status,
+      updated_at=excluded.updated_at
+  `);
+
+  const tx = db.transaction((rows)=>{
+    let n = 0;
+    for(const r of rows){
+      const code = String(r.code||"").trim();
+      const product_name = String(r.product_name||"").trim();
+      if(!code || !product_name) continue;
+      const batch_serial = String(r.batch_serial||"").trim();
+      const mfg_date = normalizeDMY(r.mfg_date);
+      const exp_date = normalizeDMY(r.exp_date);
+      const note_extra = String(r.note_extra||"").trim();
+      const status = String(r.status||"active").trim().toLowerCase() || "active";
+      const created_at = nowIso();
+      const updated_at = created_at;
+      insert.run({ code, product_name, batch_serial, mfg_date, exp_date, note_extra, status, created_at, updated_at });
+      n++;
+    }
+    return n;
+  });
+
+  try{
+    const imported = tx(rows);
+    logAudit({ actor, action: "BULK_IMPORT_EXCEL", code: "", detail: { imported, source: String(body.source||"") } });
+    return res.json({ ok:true, imported });
+  }catch(e){
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.get("/api/qr/:code/png", async (req, res)=>{
   const code = String(req.params.code||"").trim();
   if(!code) return res.status(400).send("missing code");
