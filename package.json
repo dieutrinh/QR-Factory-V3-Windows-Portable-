@@ -1,6 +1,6 @@
 {
-  "name": "qr-factory-v3",
-  "version": "3.1.1",
+  "name": "qr-factory-v4",
+  "version": "4.0.0",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -23,8 +23,8 @@
   },
   "build": {
     "asar": false,
-    "appId": "com.qrfactory.v31",
-    "productName": "QR Factory V3.1",
+    "appId": "com.qrfactory.v4",
+    "productName": "QR Factory V4",
     "directories": {
       "output": "dist"
     },
@@ -38,8 +38,14 @@
     ],
     "win": {
       "target": [
+        "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
     }
   }
 }

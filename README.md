@@ -1,4 +1,4 @@
-# QR Factory V3.1.1 (Trọn gói)
+# QR Factory V4.1 (Trọn gói)
 
 ## Có sẵn trong ZIP này
 - UI 3D buttons đồng bộ (Generate/Admin/Dashboard/Scan)
@@ -36,7 +36,7 @@ npm run server
 ## C. Build Portable EXE (Windows)
 ```bash
 npm run dist:win
-# output: dist/QR Factory V3.1.exe
+# output: dist/QR Factory V4.exe
 ```
 
 ---
@@ -50,8 +50,8 @@ Repo cần có:
 - thư mục `www/` bắt buộc: `index.html`, `admin.html`, `dashboard.html`, `qr.html`, `shared.css`, `qrFactoryV3.js`
 
 ### 2) Build bằng GitHub Actions
-- Vào tab Actions → chọn workflow `Build QR Factory V3.1 (Windows Portable)` → Run workflow.
-- Tải artifact `qr-factory-v31-portable` → lấy file EXE.
+- Vào tab Actions → chọn workflow `Build QR Factory V4 (Windows Portable)` → Run workflow.
+- Tải artifact `qr-factory-v4-portable` → lấy file EXE.
 
 ### 3) Nếu muốn encode QR về domain admin thật
 - Trên server deploy set biến môi trường: `PUBLIC_BASE_URL=https://admin-domain.com`
@@ -60,3 +60,9 @@ Repo cần có:
 
 ## Workflow đã kèm sẵn
 Xem `.github/workflows/build-win.yml`
+
+
+## V4.0.0
+- Thêm trang **Audit UI**: `www/audit.html` (xem log audit trực quan).
+- Admin: thêm link Audit + danh sách Export có **lọc/sắp xếp**.
+- Build Windows: thêm target `nsis` + `portable` để cài đặt dễ hơn.
