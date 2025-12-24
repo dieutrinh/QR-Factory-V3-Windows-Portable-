@@ -1,0 +1,42 @@
+{
+  "name": "qr-factory-v3",
+  "version": "3.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js",
+    "dist:win": "electron-builder --win portable",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.0.0",
+    "qrcode": "^1.5.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "31.0.0",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "asar": false,
+    "appId": "com.qrfactory.v3",
+    "productName": "QR Factory V3",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "www/**/*",
+      "main.js",
+      "server.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}
