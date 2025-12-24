@@ -129,11 +129,20 @@ app.get("/api/products/:code", (req, res)=>{
 });
 
 // Serve static UI
-const WWW = path.join(__dirname, "www");
+const fs = require("fs");
+let WWW = path.join(__dirname, "www");
+if(!fs.existsSync(WWW)){
+  // fallback: repo structure has html at root
+  WWW = __dirname;
+}
 app.use(express.static(WWW, { extensions: ["html"] }));
 
 // default
-app.get("/", (_req,res)=>res.sendFile(path.join(WWW, "index.html")));
+app.get("/", (_req,res)=>{
+  const idx = path.join(WWW, "index.html");
+  res.sendFile(idx);
+});
+
 
 function startServer(port=0){
   return new Promise((resolve, reject)=>{

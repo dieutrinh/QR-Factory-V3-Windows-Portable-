@@ -22,7 +22,7 @@ async function createWindow(){
     }
   });
 
-  await win.loadURL(`${baseUrl}/index.html`);
+  await win.loadURL(`${baseUrl}/index.html`).catch(async ()=>{ await win.loadURL(`${baseUrl}/`); });
 }
 
 ipcMain.handle("api:get", async (_e, url)=>{
