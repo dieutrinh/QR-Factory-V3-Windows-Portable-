@@ -1,4 +1,4 @@
-name: Build QR Factory V3 (Windows Portable)
+name: Build QR Factory V3.1 (Windows Portable)
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -23,8 +22,7 @@ jobs:
         run: npm install
 
       - name: Rebuild native modules for Electron
-        run: |
-          npx electron-rebuild -f -w better-sqlite3
+        run: npx electron-rebuild -f -w better-sqlite3
 
       - name: Build portable EXE
         run: npm run dist:win
@@ -32,5 +30,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: qr-factory-v3-portable
+          name: qr-factory-v31-portable
           path: dist/*.exe
