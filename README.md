@@ -66,3 +66,9 @@ Xem `.github/workflows/build-win.yml`
 - Thêm trang **Audit UI**: `www/audit.html` (xem log audit trực quan).
 - Admin: thêm link Audit + danh sách Export có **lọc/sắp xếp**.
 - Build Windows: thêm target `nsis` + `portable` để cài đặt dễ hơn.
+
+
+## Excel Template (v4.3)
+- Template mẫu nằm ở: `excel-template/QR_Factory_Template_v4.3.xlsx`
+- Gồm 4 sheet chuẩn: `products`, `customers`, `staff`, `config`
+- Có dropdown (data validation) cho cột `status` để tránh sai chính tả khi import.
