@@ -98,6 +98,8 @@ function renderQrText(boxId, text){
 
 async function loadPublic(){
   const r = await window.qrFactoryV3.apiGet("/api/auth/public");
+  // Autofill current admin code for desktop demo so buttons work out-of-the-box.
+  if(r.admin_code) $("admin_code").value = r.admin_code;
   $("outInstall").textContent = r.app_install_url || "-";
   $("app_install_url").value = r.app_install_url || "";
   renderQrText("installBox", r.app_install_url || "");
