@@ -9,12 +9,19 @@ th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-
 th{color:var(--muted);font-weight:600}
 .hi{outline:2px solid rgba(124,255,180,.35); background: rgba(124,255,180,.06);}
 input{width:360px;max-width:100%}
+.small{font-size:12px}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:10px;align-items:center;margin-top:10px}
+.kv input{width:100%}
+.row2{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.pill2{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;color:var(--muted)}
+.files{margin-top:10px;border:1px dashed var(--line);border-radius:12px;padding:10px}
+.files a{display:inline-block;margin-right:10px;margin-top:6px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
-    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V3.1</span></h2>
+    <h2>📋 Admin — Full danh sách sản phẩm <span class="pill">V3.1.1</span></h2>
     <div class="row">
       <a href="./index.html">← Generate</a>
       <a href="./dashboard.html">Dashboard</a>
@@ -22,7 +29,28 @@ input{width:360px;max-width:100%}
       <button class="btn secondary" id="btnReload">↻ Tải lại</button>
       <button class="btn secondary" id="btnCheck">🔎 Check update</button>
       <button class="btn" id="btnExport">⬇ Xuất Excel</button>
+      <button class="btn secondary" id="btnExportOpen" title="Xuất Excel rồi mở thư mục">⬇📂 Export + Open</button>
+      <button class="btn" id="btnImport">⬆ Import Excel</button>
     </div>
+
+    <div class="kv">
+      <div><b>Public URL</b> <span class="pill2">runtime</span></div>
+      <div class="row2">
+        <input id="publicUrl" placeholder="vd https://admin.example.com"/>
+        <button class="btn secondary" id="btnSaveUrl">💾 Lưu URL</button>
+        <span class="muted small">Dùng để build link QR (sheet <code>config.publicBaseUrl</code> khi Export)</span>
+      </div>
+
+      <div><b>Thư mục Excel</b> <span class="pill2">lưu vĩnh viễn</span></div>
+      <div class="row2">
+        <input id="excelDir" placeholder="Chưa chọn" readonly/>
+        <button class="btn secondary" id="btnPickDir">📁 Chọn thư mục</button>
+        <button class="btn secondary" id="btnOpenDir">📂 Mở thư mục</button>
+        <span class="muted small">Export sẽ lưu vào đây (offline, không cần CDN)</span>
+      </div>
+    </div>
+
+    <div class="files" id="recentBox" style="display:none"></div>
     <div id="err" class="err"></div>
     <div class="muted" id="syncNote" style="margin-top:8px"></div>
 
@@ -45,6 +73,42 @@ function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&
 let lastRows = [];
 let lastSync = null;
 const changed = new Set();
+
+async function isElectron(){
+  return !!(window.qrFactory && typeof window.qrFactory.getSettings === "function");
+}
+
+function renderRecent(settings){
+  const box = $("recentBox");
+  const list = settings?.recentExports || [];
+  if(!list.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+  box.style.display = "block";
+  box.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <b>Excel export gần đây</b>
+      <span class="muted small">(click để mở thư mục file)</span>
+    </div>
+    <div style="margin-top:6px">
+      ${list.map(x=>`<a href="#" data-path="${esc(x.filePath||"")}" class="small">📄 ${esc((x.filePath||"").split(/[/\\]/).pop())}</a>`).join("")}
+    </div>
+  `;
+  box.querySelectorAll("a[data-path]").forEach(a=>{
+    a.onclick = async (e)=>{
+      e.preventDefault();
+      const p = a.getAttribute("data-path");
+      if(!p) return;
+      try{ await window.qrFactory.openPath(p); }catch(err){ $("err").textContent = err.message||String(err); }
+    };
+  });
+}
+
+async function loadSettings(){
+  if(!(await isElectron())) return;
+  const s = await window.qrFactory.getSettings();
+  $("excelDir").value = s.excelDir || "";
+  $("publicUrl").value = s.publicUrl || "";
+  renderRecent(s);
+}
 
 function renderTable(){
   const tb = $("tb");
@@ -90,16 +154,24 @@ async function checkUpdate(){
   renderTable();
 }
 
-async function exportExcel(){
+async function exportExcel(openAfter=false){
+  $("err").textContent = "";
+  if(await isElectron()){
+    const r = await window.qrFactory.exportExcelToFolder();
+    await loadSettings();
+    if(openAfter) await window.qrFactory.openPath($("excelDir").value);
+    $("syncNote").textContent = `Exported: ${r.filePath}`;
+    return;
+  }
+  // Browser fallback (needs CDN)
   if(!window.XLSX){
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
-    s.onload = () => exportExcel().catch(e=>$("err").textContent=e.message||String(e));
+    s.onload = () => exportExcel(openAfter).catch(e=>$("err").textContent=e.message||String(e));
     s.onerror = () => $("err").textContent = "Không tải được XLSX (CDN).";
     document.head.appendChild(s);
     return;
   }
-
   const rows = lastRows.map(r => ({
     code: r.code,
     product_name: r.product_name,
@@ -110,25 +182,72 @@ async function exportExcel(){
     status: r.status,
     updated_at: r.updated_at,
   }));
-
   const ws = XLSX.utils.json_to_sheet(rows);
   ws["!freeze"] = { xSplit: 0, ySplit: 1 };
   const range = XLSX.utils.decode_range(ws["!ref"]);
   ws["!autofilter"] = { ref: XLSX.utils.encode_range(range) };
   ws["!cols"] = [
-    { wch: 18 },{ wch: 18 },{ wch: 16 },{ wch: 12 },{ wch: 12 },{ wch: 20 },{ wch: 10 },{ wch: 26 }
+    { wch: 18 },{ wch: 22 },{ wch: 16 },{ wch: 12 },{ wch: 12 },{ wch: 22 },{ wch: 10 },{ wch: 26 }
   ];
-
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "products");
   XLSX.writeFile(wb, `qr-products-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+async function importExcel(){
+  $("err").textContent = "";
+  if(!(await isElectron())) throw new Error("Import Excel chỉ hỗ trợ khi chạy bản Electron (.exe/.dmg/.AppImage).");
+  const pick = await window.qrFactory.pickExcelFile();
+  if(pick.canceled) return;
+  const r = await window.qrFactory.importExcelFromFile(pick.filePath);
+  await loadSettings();
+  await load();
+  $("syncNote").textContent = `Imported: ${r.imported} • Public URL: ${r.publicUrl || "(empty)"}`;
+}
+
 document.addEventListener("DOMContentLoaded", ()=>{
   $("btnReload").onclick = ()=>load().catch(e=>$("err").textContent=e.message||String(e));
   $("btnCheck").onclick = ()=>checkUpdate().catch(e=>$("err").textContent=e.message||String(e));
-  $("btnExport").onclick = ()=>exportExcel().catch(e=>$("err").textContent=e.message||String(e));
+  $("btnExport").onclick = ()=>exportExcel(false).catch(e=>$("err").textContent=e.message||String(e));
+  $("btnExportOpen").onclick = ()=>exportExcel(true).catch(e=>$("err").textContent=e.message||String(e));
+  $("btnImport").onclick = ()=>importExcel().catch(e=>$("err").textContent=e.message||String(e));
+
+  $("btnPickDir").onclick = async ()=>{
+    try{
+      $("err").textContent = "";
+      if(!(await isElectron())) throw new Error("Chọn thư mục chỉ hỗ trợ khi chạy bản Electron.");
+      const r = await window.qrFactory.pickExcelFolder();
+      if(!r.canceled) $("excelDir").value = r.excelDir || "";
+      await loadSettings();
+    }catch(e){ $("err").textContent = e.message||String(e); }
+  };
+
+  $("btnOpenDir").onclick = async ()=>{
+    try{
+      $("err").textContent = "";
+      if(!(await isElectron())) throw new Error("Mở thư mục chỉ hỗ trợ khi chạy bản Electron.");
+      const dir = $("excelDir").value.trim();
+      if(!dir) throw new Error("Chưa chọn thư mục Excel.");
+      await window.qrFactory.openPath(dir);
+    }catch(e){ $("err").textContent = e.message||String(e); }
+  };
+
+  $("btnSaveUrl").onclick = async ()=>{
+    try{
+      $("err").textContent = "";
+      const v = $("publicUrl").value.trim();
+      if(!(await isElectron())){
+        // Web mode: best-effort (server env only when running Node)
+        return $("syncNote").textContent = "(Web mode) Public URL chỉ lưu runtime khi chạy bản Electron.";
+      }
+      await window.qrFactory.setSettings({ publicUrl: v });
+      await loadSettings();
+      $("syncNote").textContent = `Saved Public URL: ${v || "(empty)"}`;
+    }catch(e){ $("err").textContent = e.message||String(e); }
+  };
+
   $("q").addEventListener("keydown",(e)=>{ if(e.key==="Enter") load().catch(err=>$("err").textContent=err.message||String(err)); });
+  loadSettings().catch(()=>{});
   load().catch(e=>$("err").textContent=e.message||String(e));
 });
 </script>
