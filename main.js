@@ -186,8 +186,10 @@ ipcMain.handle("excel:export", async ()=>{
   const s = readSettings();
   if(!s.excelDir) throw new Error("Chưa chọn thư mục Excel. Hãy bấm 📁 Chọn thư mục trước.");
 
-  const { rows } = await apiGet("/api/products");
-  const products = (rows||[]).map(r => ({
+  const publicBase = (s.publicUrl || process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+
+  const { rows: productRows } = await apiGet("/api/products");
+  const products = (productRows||[]).map(r => ({
     code: r.code,
     product_name: r.product_name,
     batch_serial: r.batch_serial,
@@ -195,6 +197,30 @@ ipcMain.handle("excel:export", async ()=>{
     exp_date: r.exp_date,
     note_extra: r.note_extra,
     status: r.status,
+    updated_at: r.updated_at,
+    scan_url: publicBase ? `${publicBase}/qr.html?token=${encodeURIComponent(r.code)}` : "",
+  }));
+
+  const { rows: customerRows } = await apiGet("/api/customers");
+  const customers = (customerRows||[]).map(r => ({
+    id: r.id,
+    name: r.name,
+    contract_start: r.contract_start,
+    contract_end: r.contract_end,
+    product_type: r.product_type,
+    contract_value: r.contract_value,
+    status: r.status,
+    note: r.note,
+    updated_at: r.updated_at,
+  }));
+
+  const { rows: staffRows } = await apiGet("/api/staff");
+  const staff = (staffRows||[]).map(r => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    note: r.note,
     updated_at: r.updated_at,
   }));
 
@@ -204,14 +230,26 @@ ipcMain.handle("excel:export", async ()=>{
   const range = XLSX.utils.decode_range(wsP["!ref"]);
   wsP["!autofilter"] = { ref: XLSX.utils.encode_range(range) };
   wsP["!cols"] = [
-    { wch: 18 },{ wch: 22 },{ wch: 16 },{ wch: 12 },{ wch: 12 },{ wch: 22 },{ wch: 10 },{ wch: 26 }
+    { wch: 18 },{ wch: 22 },{ wch: 16 },{ wch: 12 },{ wch: 12 },{ wch: 22 },{ wch: 10 },{ wch: 26 },{ wch: 44 }
   ];
   XLSX.utils.book_append_sheet(wb, wsP, "products");
+
+  const wsCus = XLSX.utils.json_to_sheet(customers);
+  wsCus["!freeze"] = { xSplit: 0, ySplit: 1 };
+  wsCus["!cols"] = [{ wch: 8 },{ wch: 26 },{ wch: 12 },{ wch: 12 },{ wch: 24 },{ wch: 14 },{ wch: 10 },{ wch: 28 },{ wch: 26 }];
+  XLSX.utils.book_append_sheet(wb, wsCus, "customers");
+
+  const wsStaff = XLSX.utils.json_to_sheet(staff);
+  wsStaff["!freeze"] = { xSplit: 0, ySplit: 1 };
+  wsStaff["!cols"] = [{ wch: 8 },{ wch: 22 },{ wch: 26 },{ wch: 16 },{ wch: 28 },{ wch: 26 }];
+  XLSX.utils.book_append_sheet(wb, wsStaff, "staff");
 
   const configRows = [
     { key: "config.publicBaseUrl", value: s.publicUrl || process.env.PUBLIC_BASE_URL || "" },
     { key: "meta.generatedAt", value: new Date().toISOString() },
     { key: "meta.totalProducts", value: products.length },
+    { key: "meta.totalCustomers", value: customers.length },
+    { key: "meta.totalStaff", value: staff.length },
   ];
   const wsC = XLSX.utils.json_to_sheet(configRows);
   wsC["!cols"] = [{ wch: 28 }, { wch: 64 }];
@@ -254,8 +292,8 @@ ipcMain.handle("excel:import", async (_e, { filePath })=>{
 
   // 2) products sheet -> bulk upsert
   if(!wb.Sheets.products) throw new Error("Excel thiếu sheet 'products'.");
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets.products, { defval: "" });
-  const cleaned = rows
+  const prodRows = XLSX.utils.sheet_to_json(wb.Sheets.products, { defval: "" });
+  const cleanedProducts = prodRows
     .map(r => ({
       code: String(r.code||"").trim(),
       product_name: String(r.product_name||"").trim(),
@@ -267,9 +305,64 @@ ipcMain.handle("excel:import", async (_e, { filePath })=>{
     }))
     .filter(r => r.code && r.product_name);
 
-  const resp = await apiPost("/api/products/bulkUpsert", { rows: cleaned, source: path.basename(filePath) }, { "x-actor": "admin" });
+  const respProducts = await apiPost(
+    "/api/products/bulkUpsert",
+    { rows: cleanedProducts, source: path.basename(filePath) },
+    { "x-actor": "admin" }
+  );
+
+  // 3) customers sheet (optional)
+  let importedCustomers = 0;
+  if(wb.Sheets.customers){
+    const cusRows = XLSX.utils.sheet_to_json(wb.Sheets.customers, { defval: "" });
+    const cleanedCustomers = cusRows.map(r => ({
+      id: Number(r.id||0) || 0,
+      name: String(r.name||"").trim(),
+      contract_start: String(r.contract_start||"").trim(),
+      contract_end: String(r.contract_end||"").trim(),
+      product_type: String(r.product_type||"").trim(),
+      contract_value: Number(r.contract_value||0) || 0,
+      status: String(r.status||"active").trim() || "active",
+      note: String(r.note||"").trim(),
+    })).filter(r => r.name);
+    const resp = await apiPost(
+      "/api/customers/bulkUpsert",
+      { rows: cleanedCustomers, source: path.basename(filePath) },
+      { "x-actor": "admin" }
+    );
+    importedCustomers = resp.imported || 0;
+  }
+
+  // 4) staff sheet (optional)
+  let importedStaff = 0;
+  if(wb.Sheets.staff){
+    const staffRows = XLSX.utils.sheet_to_json(wb.Sheets.staff, { defval: "" });
+    const cleanedStaff = staffRows.map(r => ({
+      id: Number(r.id||0) || 0,
+      name: String(r.name||"").trim(),
+      email: String(r.email||"").trim(),
+      phone: String(r.phone||"").trim(),
+      note: String(r.note||"").trim(),
+    })).filter(r => r.name);
+    const resp = await apiPost(
+      "/api/staff/bulkUpsert",
+      { rows: cleanedStaff, source: path.basename(filePath) },
+      { "x-actor": "admin" }
+    );
+    importedStaff = resp.imported || 0;
+  }
+
   const settings = readSettings();
-  return { ok:true, imported: resp.imported || 0, publicUrl: process.env.PUBLIC_BASE_URL || "", settings };
+  return {
+    ok:true,
+    imported: {
+      products: respProducts.imported || 0,
+      customers: importedCustomers,
+      staff: importedStaff,
+    },
+    publicUrl: process.env.PUBLIC_BASE_URL || "",
+    settings,
+  };
 });
 
 app.whenReady().then(createWindow);

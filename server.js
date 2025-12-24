@@ -293,6 +293,112 @@ app.post("/api/staff/delete", (req, res)=>{
   res.json({ ok:true });
 });
 
+// Bulk upsert customers from Excel import (offline admin tool)
+app.post("/api/customers/bulkUpsert", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const body = req.body || {};
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if(!rows.length) return res.json({ ok:true, imported: 0 });
+
+  const insert = db.prepare(`
+    INSERT INTO customers(name, contract_start, contract_end, product_type, contract_value, status, note, created_at, updated_at)
+    VALUES (@name, @contract_start, @contract_end, @product_type, @contract_value, @status, @note, @created_at, @updated_at)
+  `);
+  const update = db.prepare(`
+    UPDATE customers SET
+      name=@name,
+      contract_start=@contract_start,
+      contract_end=@contract_end,
+      product_type=@product_type,
+      contract_value=@contract_value,
+      status=@status,
+      note=@note,
+      updated_at=@updated_at
+    WHERE id=@id
+  `);
+
+  const tx = db.transaction((rows)=>{
+    let n = 0;
+    for(const r of rows){
+      const id = Number(r.id||0) || 0;
+      const name = String(r.name||"").trim();
+      if(!name) continue;
+      const contract_start = normalizeDMY(r.contract_start);
+      const contract_end = normalizeDMY(r.contract_end);
+      const product_type = String(r.product_type||"").trim();
+      const contract_value = Number(r.contract_value||0) || 0;
+      const status = String(r.status||"active").trim().toLowerCase() || "active";
+      const note = String(r.note||"").trim();
+      const ts = nowIso();
+      if(id > 0){
+        update.run({ id, name, contract_start, contract_end, product_type, contract_value, status, note, updated_at: ts });
+      }else{
+        insert.run({ name, contract_start, contract_end, product_type, contract_value, status, note, created_at: ts, updated_at: ts });
+      }
+      n++;
+    }
+    return n;
+  });
+
+  try{
+    const imported = tx(rows);
+    logAudit({ actor, action: "BULK_IMPORT_CUSTOMERS", code: "", detail: { imported, source: String(body.source||"") } });
+    return res.json({ ok:true, imported });
+  }catch(e){
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Bulk upsert staff from Excel import (offline admin tool)
+app.post("/api/staff/bulkUpsert", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const body = req.body || {};
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if(!rows.length) return res.json({ ok:true, imported: 0 });
+
+  const insert = db.prepare(`
+    INSERT INTO staff(name, email, phone, note, created_at, updated_at)
+    VALUES (@name, @email, @phone, @note, @created_at, @updated_at)
+  `);
+  const update = db.prepare(`
+    UPDATE staff SET
+      name=@name,
+      email=@email,
+      phone=@phone,
+      note=@note,
+      updated_at=@updated_at
+    WHERE id=@id
+  `);
+
+  const tx = db.transaction((rows)=>{
+    let n = 0;
+    for(const r of rows){
+      const id = Number(r.id||0) || 0;
+      const name = String(r.name||"").trim();
+      if(!name) continue;
+      const email = String(r.email||"").trim();
+      const phone = String(r.phone||"").trim();
+      const note = String(r.note||"").trim();
+      const ts = nowIso();
+      if(id > 0){
+        update.run({ id, name, email, phone, note, updated_at: ts });
+      }else{
+        insert.run({ name, email, phone, note, created_at: ts, updated_at: ts });
+      }
+      n++;
+    }
+    return n;
+  });
+
+  try{
+    const imported = tx(rows);
+    logAudit({ actor, action: "BULK_IMPORT_STAFF", code: "", detail: { imported, source: String(body.source||"") } });
+    return res.json({ ok:true, imported });
+  }catch(e){
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.get("/api/assignments", (_req, res)=>{
   const rows = db.prepare(`
     SELECT sc.staff_id, s.name AS staff_name, sc.customer_id, c.name AS customer_name
