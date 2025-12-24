@@ -37,6 +37,57 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_code ON audit_log(code);
+
+-- CRM-lite
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  contract_start TEXT,
+  contract_end TEXT,
+  product_type TEXT,
+  contract_value REAL DEFAULT 0,
+  status TEXT DEFAULT 'active',
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
+
+CREATE TABLE IF NOT EXISTS staff (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(name);
+
+CREATE TABLE IF NOT EXISTS staff_customer (
+  staff_id INTEGER NOT NULL,
+  customer_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (staff_id, customer_id)
+);
+
+-- Demo auth: admin-code + one-time tokens for login/logout
+CREATE TABLE IF NOT EXISTS settings (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token TEXT PRIMARY KEY,
+  type TEXT NOT NULL, -- login | logout
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  used_by TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_expires ON auth_tokens(expires_at);
 `);
 
 function nowIso() { return new Date().toISOString(); }
@@ -64,6 +115,20 @@ function logAudit({ actor, action, code, detail }){
       .run(nowIso(), actor || "", action, code || "", JSON.stringify(detail || {}));
   }catch(_e){}
 }
+
+function getSetting(k, fallback=""){
+  const row = db.prepare(`SELECT v FROM settings WHERE k=?`).get(k);
+  return row ? String(row.v||"") : fallback;
+}
+
+function setSetting(k, v){
+  db.prepare(`INSERT INTO settings(k,v,updated_at) VALUES(?,?,?)
+    ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated_at=excluded.updated_at`).run(k, String(v||""), nowIso());
+}
+
+// Ensure defaults
+if(!getSetting("admin_code")) setSetting("admin_code", makeCode());
+if(!getSetting("app_install_url")) setSetting("app_install_url", "https://example.com/app.apk");
 
 app.get("/health", (_req, res)=>res.json({ ok:true, db: DB_PATH }));
 
@@ -111,6 +176,213 @@ app.get("/api/products/:code", (req, res)=>{
   `).get(code);
   if(!row) return res.status(404).json({ error: "Not found" });
   res.json({ row });
+});
+
+// -------- Customers --------
+app.get("/api/customers", (req, res)=>{
+  const q = String(req.query.q||"").trim();
+  let rows;
+  if(q){
+    const like = `%${q}%`;
+    rows = db.prepare(`
+      SELECT id, name, contract_start, contract_end, product_type, contract_value, status, note, updated_at
+      FROM customers
+      WHERE name LIKE ? OR product_type LIKE ? OR status LIKE ?
+      ORDER BY updated_at DESC
+      LIMIT 2000
+    `).all(like, like, like);
+  } else {
+    rows = db.prepare(`
+      SELECT id, name, contract_start, contract_end, product_type, contract_value, status, note, updated_at
+      FROM customers
+      ORDER BY updated_at DESC
+      LIMIT 5000
+    `).all();
+  }
+  res.json({ rows });
+});
+
+app.post("/api/customers/upsert", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const b = req.body || {};
+  const id = Number(b.id||0) || 0;
+  const name = String(b.name||"").trim();
+  if(!name) return res.status(400).json({ error: "name is required" });
+  const contract_start = normalizeDMY(b.contract_start);
+  const contract_end = normalizeDMY(b.contract_end);
+  const product_type = String(b.product_type||"").trim();
+  const contract_value = Number(b.contract_value||0) || 0;
+  const status = String(b.status||"active").trim().toLowerCase() || "active";
+  const note = String(b.note||"").trim();
+  const ts = nowIso();
+
+  if(id){
+    db.prepare(`UPDATE customers SET name=?, contract_start=?, contract_end=?, product_type=?, contract_value=?, status=?, note=?, updated_at=? WHERE id=?`)
+      .run(name, contract_start, contract_end, product_type, contract_value, status, note, ts, id);
+    logAudit({ actor, action: "UPSERT_CUSTOMER", code: String(id), detail: { name, product_type, status } });
+    return res.json({ ok:true, id });
+  }
+  const info = db.prepare(`INSERT INTO customers(name, contract_start, contract_end, product_type, contract_value, status, note, created_at, updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?)`).run(name, contract_start, contract_end, product_type, contract_value, status, note, ts, ts);
+  logAudit({ actor, action: "CREATE_CUSTOMER", code: String(info.lastInsertRowid), detail: { name, product_type, status } });
+  res.json({ ok:true, id: info.lastInsertRowid });
+});
+
+app.post("/api/customers/delete", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const id = Number((req.body||{}).id||0) || 0;
+  if(!id) return res.status(400).json({ error: "id is required" });
+  db.prepare(`DELETE FROM staff_customer WHERE customer_id=?`).run(id);
+  db.prepare(`DELETE FROM customers WHERE id=?`).run(id);
+  logAudit({ actor, action: "DELETE_CUSTOMER", code: String(id), detail: {} });
+  res.json({ ok:true });
+});
+
+// -------- Staff + assignments --------
+app.get("/api/staff", (req, res)=>{
+  const q = String(req.query.q||"").trim();
+  let rows;
+  if(q){
+    const like = `%${q}%`;
+    rows = db.prepare(`SELECT id, name, email, phone, note, updated_at FROM staff WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 2000`)
+      .all(like, like, like);
+  } else {
+    rows = db.prepare(`SELECT id, name, email, phone, note, updated_at FROM staff ORDER BY updated_at DESC LIMIT 5000`).all();
+  }
+  res.json({ rows });
+});
+
+app.post("/api/staff/upsert", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const b = req.body || {};
+  const id = Number(b.id||0) || 0;
+  const name = String(b.name||"").trim();
+  if(!name) return res.status(400).json({ error: "name is required" });
+  const email = String(b.email||"").trim();
+  const phone = String(b.phone||"").trim();
+  const note = String(b.note||"").trim();
+  const ts = nowIso();
+  if(id){
+    db.prepare(`UPDATE staff SET name=?, email=?, phone=?, note=?, updated_at=? WHERE id=?`).run(name, email, phone, note, ts, id);
+    logAudit({ actor, action: "UPSERT_STAFF", code: String(id), detail: { name } });
+    return res.json({ ok:true, id });
+  }
+  const info = db.prepare(`INSERT INTO staff(name, email, phone, note, created_at, updated_at) VALUES(?,?,?,?,?,?)`).run(name, email, phone, note, ts, ts);
+  logAudit({ actor, action: "CREATE_STAFF", code: String(info.lastInsertRowid), detail: { name } });
+  res.json({ ok:true, id: info.lastInsertRowid });
+});
+
+app.post("/api/staff/delete", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const id = Number((req.body||{}).id||0) || 0;
+  if(!id) return res.status(400).json({ error: "id is required" });
+  db.prepare(`DELETE FROM staff_customer WHERE staff_id=?`).run(id);
+  db.prepare(`DELETE FROM staff WHERE id=?`).run(id);
+  logAudit({ actor, action: "DELETE_STAFF", code: String(id), detail: {} });
+  res.json({ ok:true });
+});
+
+app.get("/api/assignments", (_req, res)=>{
+  const rows = db.prepare(`
+    SELECT sc.staff_id, s.name AS staff_name, sc.customer_id, c.name AS customer_name
+    FROM staff_customer sc
+    JOIN staff s ON s.id=sc.staff_id
+    JOIN customers c ON c.id=sc.customer_id
+    ORDER BY s.name, c.name
+  `).all();
+  res.json({ rows });
+});
+
+app.post("/api/assignments/set", (req, res)=>{
+  const actor = String(req.get("x-actor") || "").trim();
+  const b = req.body || {};
+  const staff_id = Number(b.staff_id||0) || 0;
+  const customer_id = Number(b.customer_id||0) || 0;
+  const on = !!b.on;
+  if(!staff_id || !customer_id) return res.status(400).json({ error: "staff_id and customer_id required" });
+  if(on){
+    db.prepare(`INSERT OR IGNORE INTO staff_customer(staff_id, customer_id, created_at) VALUES(?,?,?)`).run(staff_id, customer_id, nowIso());
+  } else {
+    db.prepare(`DELETE FROM staff_customer WHERE staff_id=? AND customer_id=?`).run(staff_id, customer_id);
+  }
+  logAudit({ actor, action: "SET_ASSIGNMENT", code: `${staff_id}:${customer_id}`, detail: { on } });
+  res.json({ ok:true });
+});
+
+// -------- Demo login/logout via QR tokens --------
+function makeToken(){
+  const part = () => Math.random().toString(36).slice(2, 10);
+  return `${part()}${part()}${Date.now().toString(36)}`;
+}
+
+app.get("/api/auth/public", (_req, res)=>{
+  // Safe information for rendering the install/login page
+  res.json({ app_install_url: getSetting("app_install_url"), has_admin_code: !!getSetting("admin_code") });
+});
+
+app.post("/api/auth/setAdminCode", (req, res)=>{
+  const b = req.body || {};
+  const current = String((b.current_admin_code||b.admin_code)||"").trim();
+  const next = String(b.new_admin_code||"").trim();
+  if(current !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
+  if(!next || next.length < 6) return res.status(400).json({ error: "new_admin_code too short" });
+  setSetting("admin_code", next);
+  logAudit({ actor: "admin", action: "ROTATE_ADMIN_CODE", code: "", detail: {} });
+  res.json({ ok:true, admin_code: next });
+});
+
+app.post("/api/auth/setInstallUrl", (req, res)=>{
+  const b = req.body || {};
+  const admin = String(b.admin_code||"").trim();
+  const url = String(b.app_install_url||"").trim();
+  if(admin !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
+  if(!url) return res.status(400).json({ error: "app_install_url required" });
+  setSetting("app_install_url", url);
+  logAudit({ actor: "admin", action: "SET_INSTALL_URL", code: "", detail: { url } });
+  res.json({ ok:true, app_install_url: url });
+});
+
+app.post("/api/auth/issue", (req, res)=>{
+  const b = req.body || {};
+  const admin = String(b.admin_code||"").trim();
+  if(admin !== getSetting("admin_code")) return res.status(403).json({ error: "admin_code invalid" });
+  const type = String(b.type||"login").trim().toLowerCase();
+  if(type !== "login" && type !== "logout") return res.status(400).json({ error: "type must be login|logout" });
+  const ttl = Math.max(1, Math.min(1440, Number(b.ttl_minutes||15) || 15));
+  const token = makeToken();
+  const expires_at = new Date(Date.now() + ttl*60*1000).toISOString();
+  db.prepare(`INSERT INTO auth_tokens(token, type, expires_at, used_at, used_by, created_by, created_at)
+    VALUES(?,?,?,?,?,?,?)`).run(token, type, expires_at, "", "", "admin", nowIso());
+  const qr_url = `/login.html?token=${encodeURIComponent(token)}`;
+  logAudit({ actor: "admin", action: "ISSUE_TOKEN", code: token, detail: { type, ttl } });
+  res.json({ ok:true, token, type, expires_at, qr_url, url: qr_url });
+});
+
+app.post("/api/auth/consume", (req, res)=>{
+  const b = req.body || {};
+  const token = String(b.token||"").trim();
+  const device = String(b.device_id||"").trim();
+  if(!token) return res.status(400).json({ error: "token required" });
+  const row = db.prepare(`SELECT token, type, expires_at, used_at FROM auth_tokens WHERE token=?`).get(token);
+  if(!row) return res.status(404).json({ error: "token not found" });
+  if(row.used_at) return res.status(409).json({ error: "token already used" });
+  if(new Date(row.expires_at).getTime() < Date.now()) return res.status(410).json({ error: "token expired" });
+  db.prepare(`UPDATE auth_tokens SET used_at=?, used_by=? WHERE token=?`).run(nowIso(), device||"device", token);
+  logAudit({ actor: device||"device", action: "CONSUME_TOKEN", code: token, detail: { type: row.type } });
+  res.json({ ok:true, action: row.type });
+});
+
+// QR helper: render QR for arbitrary text (used for app install / token URLs)
+app.get("/api/qrtext/png", async (req, res)=>{
+  const text = String(req.query.text||"").trim();
+  if(!text) return res.status(400).send("missing text");
+  try{
+    const png = await QRCode.toBuffer(text, { type:"png", width: 512, margin: 2 });
+    res.setHeader("Content-Type", "image/png");
+    res.send(png);
+  }catch(e){
+    res.status(500).send(e.message||String(e));
+  }
 });
 
 app.post("/api/generate", async (req, res)=>{
